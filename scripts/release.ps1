@@ -341,13 +341,18 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Step "Packing v$newVersion"
+# --noPortable: skip the SC-DataRunner-win-Portable.zip artifact. The portable
+# bundle disables Velopack auto-update by design (the updater needs the
+# install layout to write into), so for an auto-update-first project like
+# this one it just clutters the Releases page and confuses users.
 & vpk pack `
     --packId $PackId `
     --packVersion $newVersion `
     --packDir $publishDir `
     --mainExe $MainExe `
     --channel $ReleaseChannel `
-    --outputDir $releasesDir
+    --outputDir $releasesDir `
+    --noPortable
 if ($LASTEXITCODE -ne 0) { Fail 'vpk pack failed.' }
 
 if ($Mode -eq 'localUpload') {

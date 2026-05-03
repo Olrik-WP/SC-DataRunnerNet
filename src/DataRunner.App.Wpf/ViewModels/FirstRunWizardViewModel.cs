@@ -7,16 +7,20 @@ using DataRunner.Core.Abstractions;
 namespace DataRunner.App.ViewModels;
 
 /// <summary>
-/// Four-step welcome wizard shown on first launch.
-///   Step 0 - Welcome / what this app does
-///   Step 1 - Paste UEX user secret-key (from Account page)
-///   Step 2 - Paste UEX app bearer token (from /api/apps)
-///   Step 3 - Pick screenshot folder + done
+/// Welcome wizard shown on first launch. The number of steps is dynamic:
+///   - When the build embeds an app bearer token (official CI release), the
+///     wizard has THREE steps: welcome / secret-key / folder.
+///   - When no token is embedded (self-build / dev), it has FOUR steps:
+///     welcome / secret-key / app-bearer-token / folder.
+///
+/// Step indices stay stable for binding simplicity: step 2 is ALWAYS the
+/// bearer step, just skipped (collapsed) when the embedded token is present.
 /// </summary>
 public sealed partial class FirstRunWizardViewModel : ObservableObject
 {
     private readonly ISecretKeyStore _secretStore;
     private readonly IAppPreferences _prefs;
+    private readonly IBuiltInAppTokenProvider _builtInToken;
     private readonly IDialogService _dialog;
 
     [ObservableProperty] private int _currentStep = 0;
@@ -25,13 +29,23 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
     [ObservableProperty] private string _screenshotsFolder = "";
     [ObservableProperty] private bool _isCompleted;
 
-    public int TotalSteps => 4;
+    /// <summary>True when a build-time bearer token is available; the wizard
+    /// then skips the bearer step (3 visible steps instead of 4).</summary>
+    public bool HasBuiltInBearerToken => _builtInToken.HasToken;
+
+    /// <summary>True when the bearer step should be SHOWN to the user (i.e. no
+    /// embedded token available). Bound by the view to swap step 2's content.</summary>
+    public bool ShowsBearerStep => !HasBuiltInBearerToken;
+
+    public int TotalSteps => HasBuiltInBearerToken ? 3 : 4;
 
     public bool CanGoNext => CurrentStep switch
     {
         0 => true,
         1 => !string.IsNullOrWhiteSpace(SecretKeyInput),
-        2 => !string.IsNullOrWhiteSpace(BearerTokenInput),
+        // Step 2 is the bearer step when shown, otherwise the folder step (which
+        // doesn't gate on input).
+        2 => HasBuiltInBearerToken || !string.IsNullOrWhiteSpace(BearerTokenInput),
         3 => true,
         _ => false,
     };
@@ -39,10 +53,29 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
     public bool CanGoBack => CurrentStep > 0;
     public bool IsLastStep => CurrentStep == TotalSteps - 1;
 
-    public FirstRunWizardViewModel(ISecretKeyStore secretStore, IAppPreferences prefs, IDialogService dialog)
+    // Per-step visibility helpers used by the XAML so the view stays
+    // declarative. When a built-in token is available the wizard collapses
+    // the bearer step; the folder step then "moves up" to take its slot.
+    public bool ShowWelcomeStep => CurrentStep == 0;
+    public bool ShowSecretKeyStep => CurrentStep == 1;
+    public bool ShowBearerInputStep => CurrentStep == 2 && !HasBuiltInBearerToken;
+    public bool ShowFolderStep => (CurrentStep == 2 && HasBuiltInBearerToken)
+                                 || (CurrentStep == 3 && !HasBuiltInBearerToken);
+
+    /// <summary>"Step 2/3" or "Step 2/4" depending on whether the bearer step
+    /// is shown. Bound by the view to render the step counter consistently.</summary>
+    public string SecretKeyStepLabel => HasBuiltInBearerToken ? "1/2" : "1/3";
+    public string FolderStepLabel => HasBuiltInBearerToken ? "2/2" : "3/3";
+
+    public FirstRunWizardViewModel(
+        ISecretKeyStore secretStore,
+        IAppPreferences prefs,
+        IBuiltInAppTokenProvider builtInToken,
+        IDialogService dialog)
     {
         _secretStore = secretStore;
         _prefs = prefs;
+        _builtInToken = builtInToken;
         _dialog = dialog;
 
         // Pre-fill with whatever the user already has in prefs (in case they re-open
@@ -81,6 +114,10 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(CanGoNext));
         OnPropertyChanged(nameof(IsLastStep));
+        OnPropertyChanged(nameof(ShowWelcomeStep));
+        OnPropertyChanged(nameof(ShowSecretKeyStep));
+        OnPropertyChanged(nameof(ShowBearerInputStep));
+        OnPropertyChanged(nameof(ShowFolderStep));
     }
 
     partial void OnSecretKeyInputChanged(string value) => OnPropertyChanged(nameof(CanGoNext));
@@ -101,8 +138,10 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
             catch (Exception ex) { _dialog.ShowError("Could not save secret-key", ex.Message); return; }
             SecretKeyInput = "";
         }
-        else if (CurrentStep == 2)
+        else if (CurrentStep == 2 && !HasBuiltInBearerToken)
         {
+            // Bearer step is only meaningful when no token was embedded at
+            // build time; otherwise step 2 is already the folder step.
             try { await _secretStore.SetBearerTokenAsync(BearerTokenInput.Trim()); }
             catch (Exception ex) { _dialog.ShowError("Could not save bearer token", ex.Message); return; }
             BearerTokenInput = "";

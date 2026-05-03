@@ -27,8 +27,14 @@
             </StackPanel>
 
             <Grid Grid.Row="1" MinHeight="280">
-                <!-- Step 0: Welcome -->
-                <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource IntEqualsToVisibility}, ConverterParameter=0}">
+                <!-- Step visibility is driven by VM helper booleans (ShowXxxStep)
+                     so the wizard transparently collapses the bearer-token step
+                     when the build embeds an app token (official CI release).
+                     The folder step's slot becomes step 2 in that case, instead
+                     of step 3, but the XAML stays the same. -->
+
+                <!-- Welcome -->
+                <StackPanel Visibility="{Binding ShowWelcomeStep, Converter={StaticResource BoolToVisibility}}">
                     <ui:SymbolIcon Symbol="Rocket24" FontSize="48" HorizontalAlignment="Center" />
                     <TextBlock TextWrapping="Wrap" Margin="0,16,0,12" HorizontalAlignment="Center"
                                TextAlignment="Center" MaxWidth="500"
@@ -37,12 +43,14 @@
                                Text="Open-source, free, MIT-licensed." />
                 </StackPanel>
 
-                <!-- Step 1: User secret-key -->
-                <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource IntEqualsToVisibility}, ConverterParameter=1}">
+                <!-- User secret-key -->
+                <StackPanel Visibility="{Binding ShowSecretKeyStep, Converter={StaticResource BoolToVisibility}}">
                     <ui:SymbolIcon Symbol="Key24" FontSize="48" HorizontalAlignment="Center" />
-                    <TextBlock Text="1/2 — Paste your USER secret-key"
-                               FontSize="18" FontWeight="SemiBold"
-                               HorizontalAlignment="Center" Margin="0,12,0,4" />
+                    <TextBlock FontSize="18" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" Margin="0,12,0,4">
+                        <Run Text="{Binding SecretKeyStepLabel, Mode=OneWay}" />
+                        <Run Text=" — Paste your USER secret-key" />
+                    </TextBlock>
                     <TextBlock TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"
                                MaxWidth="500" Opacity="0.75"
                                Text="This identifies YOU on UEX. Open your account page, scroll to the 'Secret Key' section and copy the value. Encrypted at rest with Windows DPAPI; stays only on this PC." />
@@ -54,15 +62,15 @@
                                     PlaceholderText="user secret-key" />
                 </StackPanel>
 
-                <!-- Step 2: App bearer token -->
-                <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource IntEqualsToVisibility}, ConverterParameter=2}">
+                <!-- App bearer token (skipped when the build has one embedded) -->
+                <StackPanel Visibility="{Binding ShowBearerInputStep, Converter={StaticResource BoolToVisibility}}">
                     <ui:SymbolIcon Symbol="AppFolder24" FontSize="48" HorizontalAlignment="Center" />
-                    <TextBlock Text="2/2 — Paste your APP bearer token"
+                    <TextBlock Text="2/3 — Paste your APP bearer token"
                                FontSize="18" FontWeight="SemiBold"
                                HorizontalAlignment="Center" Margin="0,12,0,4" />
                     <TextBlock TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"
                                MaxWidth="500" Opacity="0.75"
-                               Text="UEX requires a SECOND credential identifying the application. Open the My Apps page, create one (e.g. 'SC DataRunner Net') and copy the generated bearer token." />
+                               Text="This build does not embed an app token (you're running a self-built or development binary). UEX requires a SECOND credential identifying the application — create one on the My Apps page and paste the bearer token below." />
                     <ui:HyperlinkButton HorizontalAlignment="Center" Margin="0,4,0,12"
                                         Content="Open uexcorp.space/api/apps → create app"
                                         Command="{Binding OpenUexAppsPageCommand}" />
@@ -71,12 +79,14 @@
                                     PlaceholderText="app bearer token" />
                 </StackPanel>
 
-                <!-- Step 3: Folder -->
-                <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource IntEqualsToVisibility}, ConverterParameter=3}">
+                <!-- Folder -->
+                <StackPanel Visibility="{Binding ShowFolderStep, Converter={StaticResource BoolToVisibility}}">
                     <ui:SymbolIcon Symbol="Folder24" FontSize="48" HorizontalAlignment="Center" />
-                    <TextBlock Text="Star Citizen screenshots folder"
-                               FontSize="18" FontWeight="SemiBold"
-                               HorizontalAlignment="Center" Margin="0,12,0,4" />
+                    <TextBlock FontSize="18" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" Margin="0,12,0,4">
+                        <Run Text="{Binding FolderStepLabel, Mode=OneWay}" />
+                        <Run Text=" — Star Citizen screenshots folder" />
+                    </TextBlock>
                     <TextBlock TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"
                                MaxWidth="500" Opacity="0.75"
                                Text="The app will watch this folder and queue every new screenshot in your Inbox. You can change it later in Settings." />

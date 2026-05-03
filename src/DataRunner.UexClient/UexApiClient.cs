@@ -45,12 +45,18 @@ public sealed class UexApiClient : IUexApiClient
 
     private readonly HttpClient _http;
     private readonly ISecretKeyStore _secretStore;
+    private readonly IBuiltInAppTokenProvider _builtInToken;
     private readonly ILogger<UexApiClient> _logger;
 
-    public UexApiClient(HttpClient http, ISecretKeyStore secretStore, ILogger<UexApiClient> logger)
+    public UexApiClient(
+        HttpClient http,
+        ISecretKeyStore secretStore,
+        IBuiltInAppTokenProvider builtInToken,
+        ILogger<UexApiClient> logger)
     {
         _http = http;
         _secretStore = secretStore;
+        _builtInToken = builtInToken;
         _logger = logger;
 
         if (_http.Timeout == TimeSpan.FromSeconds(100)) // default
@@ -102,8 +108,17 @@ public sealed class UexApiClient : IUexApiClient
         //   - secret-key      : identifies the user (datarunner)
         //   - Bearer <token>  : identifies the application
         // Source: UEX staff confirmation on Discord, plus the API doc page.
+        //
+        // Bearer-token priority:
+        //   1. Custom token explicitly set by the user via Settings (override).
+        //   2. Token embedded in the binary at build time (the case for
+        //      official CI releases — see Directory.Build.props).
+        //   3. Neither → actionable error.
         var secretKey = (await _secretStore.GetAsync(ct).ConfigureAwait(false))?.Trim();
-        var bearer    = (await _secretStore.GetBearerTokenAsync(ct).ConfigureAwait(false))?.Trim();
+        var customBearer = (await _secretStore.GetBearerTokenAsync(ct).ConfigureAwait(false))?.Trim();
+        var bearer = !string.IsNullOrWhiteSpace(customBearer)
+            ? customBearer
+            : _builtInToken.GetEmbeddedToken();
 
         if (string.IsNullOrWhiteSpace(secretKey))
         {
@@ -113,8 +128,10 @@ public sealed class UexApiClient : IUexApiClient
         if (string.IsNullOrWhiteSpace(bearer))
         {
             throw new InvalidOperationException(
-                "UEX app bearer token is not configured. Create an app on " +
-                "https://uexcorp.space/api/apps and paste the token in Settings.");
+                "UEX app bearer token is not available. The official release " +
+                "ships with one embedded; if you self-built without setting " +
+                "$(UexAppBearerToken), either rebuild with the property set " +
+                "or paste your own token in Settings -> Advanced.");
         }
 
         // Strip the local _meta block before serialising. The wire format must

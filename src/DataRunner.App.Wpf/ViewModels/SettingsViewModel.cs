@@ -12,8 +12,25 @@ public sealed partial class SettingsViewModel : ObservableObject
     private readonly ISecretKeyStore _secretStore;
     private readonly ICatalogProvider _catalog;
     private readonly IAppPreferences _prefs;
+    private readonly IBuiltInAppTokenProvider _builtInToken;
     private readonly IDialogService _dialog;
     private readonly ILogger<SettingsViewModel> _logger;
+
+    /// <summary>True when the build embeds a UEX app bearer token (official
+    /// CI release). The Settings view collapses the bearer override section
+    /// behind an "Advanced" expander when this is true.</summary>
+    public bool HasBuiltInBearerToken => _builtInToken.HasToken;
+
+    /// <summary>One-line summary describing which bearer token the next
+    /// /data_submit will use, used as the header of the bearer override
+    /// section so the user always knows where they stand.</summary>
+    public string BearerTokenStatus => (HasBuiltInBearerToken, HasBearerToken) switch
+    {
+        (true, true)   => "Using your custom override (built-in token ignored).",
+        (true, false)  => "Using the built-in app token from this build (recommended).",
+        (false, true)  => "Using your custom override (no built-in token in this build).",
+        (false, false) => "No app token configured. Submissions will fail until you set one or use an official build.",
+    };
 
     /// <summary>
     /// Re-exposed so the Settings view can bind its "Updates" card to the
@@ -61,7 +78,11 @@ public sealed partial class SettingsViewModel : ObservableObject
         : "Paste your app bearer token here";
 
     partial void OnHasSecretKeyChanged(bool value) => OnPropertyChanged(nameof(KeyInputPlaceholder));
-    partial void OnHasBearerTokenChanged(bool value) => OnPropertyChanged(nameof(BearerInputPlaceholder));
+    partial void OnHasBearerTokenChanged(bool value)
+    {
+        OnPropertyChanged(nameof(BearerInputPlaceholder));
+        OnPropertyChanged(nameof(BearerTokenStatus));
+    }
 
     partial void OnAttachScreenshotOnSubmitChanged(bool value)
     {
@@ -136,6 +157,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         ISecretKeyStore secretStore,
         ICatalogProvider catalog,
         IAppPreferences prefs,
+        IBuiltInAppTokenProvider builtInToken,
         IDialogService dialog,
         UpdateViewModel updates,
         ILogger<SettingsViewModel> logger)
@@ -143,6 +165,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _secretStore = secretStore;
         _catalog = catalog;
         _prefs = prefs;
+        _builtInToken = builtInToken;
         _dialog = dialog;
         _logger = logger;
         Updates = updates;

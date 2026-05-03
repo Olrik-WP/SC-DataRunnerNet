@@ -94,46 +94,33 @@
                 </StackPanel>
             </ui:Card>
 
-            <!-- UEX APP BEARER TOKEN -->
-            <ui:Card Padding="22,18" Margin="0,0,0,16">
-                <StackPanel>
-                    <DockPanel>
-                        <ui:SymbolIcon Symbol="AppFolder24" />
-                        <TextBlock Text="UEX app bearer token"
-                                   FontSize="16" FontWeight="SemiBold"
-                                   Margin="10,0,0,0" VerticalAlignment="Center" />
-
-                        <Border DockPanel.Dock="Right" HorizontalAlignment="Right"
-                                CornerRadius="10" Padding="10,3"
-                                Visibility="{Binding HasBearerToken, Converter={StaticResource BoolToVisibility}}"
-                                Background="#1FA34A">
-                            <StackPanel Orientation="Horizontal">
-                                <ui:SymbolIcon Symbol="CheckmarkCircle16" FontSize="13" Foreground="White" />
-                                <TextBlock Text="Saved on this PC" FontSize="11"
-                                           Foreground="White" Margin="6,0,0,0" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Border>
-                        <Border DockPanel.Dock="Right" HorizontalAlignment="Right"
-                                CornerRadius="10" Padding="10,3"
-                                Visibility="{Binding HasBearerToken, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}"
-                                Background="#C0392B">
-                            <StackPanel Orientation="Horizontal">
-                                <ui:SymbolIcon Symbol="Warning16" FontSize="13" Foreground="White" />
-                                <TextBlock Text="Not configured" FontSize="11"
-                                           Foreground="White" Margin="6,0,0,0" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Border>
+            <!-- UEX APP BEARER TOKEN — collapsed by default behind an Expander
+                 because the official CI build already embeds one, so most users
+                 NEVER need to touch this. The status header always tells them
+                 which token will actually be used on the next submission. -->
+            <ui:CardExpander Padding="0" Margin="0,0,0,16">
+                <ui:CardExpander.Header>
+                    <DockPanel Margin="6,0,0,0">
+                        <ui:SymbolIcon Symbol="AppFolder24" VerticalAlignment="Center" />
+                        <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="App bearer token (advanced)"
+                                       FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding BearerTokenStatus}"
+                                       Margin="0,2,0,0" FontSize="11"
+                                       Opacity="0.75" />
+                        </StackPanel>
                     </DockPanel>
-
-                    <TextBlock TextWrapping="Wrap" Margin="0,8,0,4" Opacity="0.75"
-                               Text="Identifies the APPLICATION on every /data_submit POST (sent as 'Authorization: Bearer ...'). UEX requires BOTH this token AND your user secret-key — without it you'll get HTTP 403 / not_allowed." />
-                    <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" Opacity="0.6" FontSize="11"
-                               Text="Get it from uexcorp.space/api/apps: create a new app (e.g. 'SC DataRunner Net') and copy the generated token." />
+                </ui:CardExpander.Header>
+                <StackPanel Margin="22,8,22,18">
+                    <TextBlock TextWrapping="Wrap" Margin="0,0,0,8" Opacity="0.85"
+                               Text="UEX requires an app bearer token in addition to your user secret-key. Most users don't need to do anything here — the official build embeds one for you (see status above)." />
+                    <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" Opacity="0.65" FontSize="11"
+                               Text="Override below ONLY if you self-built the app, your build was hot-rotated, or you want to use your own UEX application for analytics. The custom token takes priority over the built-in one. 'Clear' falls back to the built-in token (or to nothing on a self-build)." />
 
                     <ui:HyperlinkButton Content="Open UEX 'My Apps' page (create app + copy token)"
                                         Command="{Binding OpenUexAppsPageCommand}" />
 
-                    <Grid Margin="0,12,0,0">
+                    <Grid Margin="0,8,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -159,11 +146,11 @@
                             <ui:SymbolIcon Symbol="Shield24" Margin="0,0,8,0" Opacity="0.75" />
                             <TextBlock TextWrapping="Wrap" FontSize="12"
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                       Text="Your app token is encrypted and saved. Same security model as the secret-key above: empty field is intentional, paste a new one to replace, 'Clear' to forget." />
+                                       Text="Your custom app token is encrypted and saved (Windows DPAPI, current user only). The field above is intentionally empty for security — paste a new one to replace, 'Clear' to forget." />
                         </DockPanel>
                     </Border>
                 </StackPanel>
-            </ui:Card>
+            </ui:CardExpander>
 
             <!-- CATALOG -->
             <ui:Card Padding="22,18" Margin="0,0,0,16">

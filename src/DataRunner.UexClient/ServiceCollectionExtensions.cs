@@ -18,6 +18,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAppPreferences>(_ => new JsonAppPreferences());
         services.AddSingleton<ISubmissionHistory>(_ => new SqliteSubmissionHistory());
 
+        // Built-in app bearer token: official CI releases bake it in via
+        // Directory.Build.props; local dev builds get a provider whose
+        // HasToken=false and the wizard then asks for a manual token.
+        services.AddSingleton<IBuiltInAppTokenProvider, AssemblyMetadataBuiltInAppTokenProvider>();
+
         services.AddHttpClient<IUexApiClient, UexApiClient>();
 
         services.AddSingleton<ICatalogProvider, CatalogProvider>();

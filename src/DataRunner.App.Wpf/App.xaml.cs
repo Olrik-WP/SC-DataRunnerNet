@@ -137,16 +137,21 @@ public partial class App : Application
         await EnsureCatalogReadyAsync();
 
         var secretStore = Host.Services.GetRequiredService<ISecretKeyStore>();
+        var builtInToken = Host.Services.GetRequiredService<IBuiltInAppTokenProvider>();
         var hasKey = await secretStore.HasKeyAsync();
-        var hasBearer = await secretStore.HasBearerTokenAsync();
+        var hasUserBearer = await secretStore.HasBearerTokenAsync();
 
         var mainWindow = Host.Services.GetRequiredService<MainWindow>();
         var mainVm = Host.Services.GetRequiredService<MainViewModel>();
         mainWindow.DataContext = mainVm;
 
-        // Trigger the first-run wizard if EITHER credential is missing —
-        // both are required by UEX for /data_submit to succeed.
-        if (!hasKey || !hasBearer)
+        // Trigger the first-run wizard when the user secret-key is missing,
+        // OR when no bearer token is available at all (neither user-provided
+        // nor embedded at build time). Official releases ship with an embedded
+        // token, so the typical first-run experience is just one secret-key
+        // step instead of two.
+        var hasAnyBearer = hasUserBearer || builtInToken.HasToken;
+        if (!hasKey || !hasAnyBearer)
         {
             mainVm.NeedsFirstRun = true;
         }

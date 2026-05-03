@@ -31,4 +31,33 @@
     <InformationalVersion>$(Version)+$(SourceRevisionId)</InformationalVersion>
   </PropertyGroup>
 
+  <!--
+    Optional UEX app bearer token, embedded into every assembly via an
+    AssemblyMetadata attribute when the MSBuild property is non-empty.
+
+    The CI workflow (.github/workflows/release.yml) passes the GitHub Actions
+    secret UEX_APP_BEARER_TOKEN as /p:UexAppBearerToken=... so official
+    releases ship with the token already baked in — end users only need to
+    paste their own UEX secret-key.
+
+    Local builds without the env var produce no attribute, and the runtime
+    falls back to asking the user for their own bearer token (the historical
+    flow). To self-build with your own token:
+
+        $env:UexAppBearerToken = 'your-token-here'
+        dotnet publish src/DataRunner.App.Wpf/DataRunner.App.Wpf.csproj -c Release
+
+    Or pass it directly:
+
+        dotnet build /p:UexAppBearerToken=your-token-here
+
+    The token is extractable from the binary (strings.exe, ILSpy, ...) — same
+    trade-off every other datarunner tool makes. If it ever leaks publicly,
+    rotate it on https://uexcorp.space/api/apps and ship a new release; users
+    auto-update via Velopack within hours.
+  -->
+  <ItemGroup Condition="'$(UexAppBearerToken)' != ''">
+    <AssemblyMetadata Include="UexAppBearerToken" Value="$(UexAppBearerToken)" />
+  </ItemGroup>
+
 </Project>
