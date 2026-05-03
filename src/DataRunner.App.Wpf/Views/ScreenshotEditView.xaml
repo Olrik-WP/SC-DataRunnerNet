@@ -73,6 +73,32 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel>
 
+                <!-- MERGED-ITEM WARNING — visible only when this submission was built
+                     from 2+ source screenshots. UEX accepts only ONE screenshot per
+                     /data_submit POST, so only the first source image is attached.
+                     New datarunners (90-day evaluation period) may see the submission
+                     rejected if commodity rows from other source screenshots aren't
+                     visually represented in the attached one. -->
+                <Border Margin="0,0,0,12" Padding="12,10"
+                        CornerRadius="6"
+                        Background="#22F0AD4E" BorderBrush="#88F0AD4E" BorderThickness="1"
+                        Visibility="{Binding IsMergedItem, Converter={StaticResource BoolToVisibility}}">
+                    <DockPanel>
+                        <ui:SymbolIcon DockPanel.Dock="Left" Symbol="Warning24"
+                                       Margin="0,0,10,0" VerticalAlignment="Top"
+                                       Foreground="#F0AD4E" />
+                        <StackPanel>
+                            <TextBlock FontWeight="SemiBold" FontSize="12">
+                                <Run Text="Merged from " />
+                                <Run Text="{Binding MergedSourceCount, Mode=OneWay}" />
+                                <Run Text=" screenshots — only the FIRST one is sent to UEX." />
+                            </TextBlock>
+                            <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Opacity="0.85"
+                                       Text="UEX accepts a single screenshot per submission. While you're in your 90-day evaluation period as a new datarunner, the manual reviewer may reject the submission for commodity rows whose visual evidence isn't on the one attached screenshot. If that happens, submit each screenshot individually until UEX validates you." />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
                 <!-- TERMINAL CARD -->
                 <ui:Card Margin="0,0,0,12" Padding="16">
                     <StackPanel>

@@ -95,15 +95,33 @@
                             </ui:Button>
                         </StackPanel>
 
-                        <!-- Merge action — visible only when 2+ items with successful OCR are selected. -->
+                        <!-- Merge action — visible only when 2+ items with successful OCR are selected.
+                             Heads-up rendered as a tooltip: UEX accepts only ONE screenshot per
+                             /data_submit POST. Merging consolidates the data rows but only the FIRST
+                             source screenshot is attached. New datarunners (UEX 90-day evaluation
+                             period) may see the submission rejected for rows whose visual evidence
+                             isn't on that single attached screenshot — submit screenshots one by
+                             one until UEX validates you. -->
                         <ui:Button Margin="0,8,0,0"
                                    HorizontalAlignment="Stretch"
                                    HorizontalContentAlignment="Center"
                                    Appearance="Secondary"
                                    Command="{Binding MergeSelectedCommand}"
                                    Padding="10,8"
-                                   ToolTip="Combine the selected screenshots into a single submission (same terminal, deduplicated commodities). Use this when one terminal has more commodities than the in-game UI shows at once."
                                    Visibility="{Binding CanMergeSelected, Converter={StaticResource BoolToVisibility}}">
+                            <ui:Button.ToolTip>
+                                <ToolTip MaxWidth="380">
+                                    <StackPanel>
+                                        <TextBlock FontWeight="SemiBold" Text="Combine selected screenshots into ONE submission" />
+                                        <TextBlock Margin="0,4,0,0" TextWrapping="Wrap"
+                                                   Text="Useful when a terminal has more commodities than the in-game UI shows at once. Rows are deduplicated, container sizes are unioned." />
+                                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Foreground="#F0AD4E"
+                                                   Text="⚠ NEW DATARUNNER WARNING" />
+                                        <TextBlock Margin="0,2,0,0" TextWrapping="Wrap"
+                                                   Text="UEX accepts only ONE screenshot per submission. Merging attaches the FIRST screenshot only — other rows have no visual evidence. While you're in the 90-day evaluation period, this can lead to rejections. Submit screenshots one by one until UEX validates you." />
+                                    </StackPanel>
+                                </ToolTip>
+                            </ui:Button.ToolTip>
                             <StackPanel Orientation="Horizontal">
                                 <ui:SymbolIcon Symbol="ImageMultiple24" Margin="0,0,6,0" />
                                 <TextBlock Text="Merge selected" />

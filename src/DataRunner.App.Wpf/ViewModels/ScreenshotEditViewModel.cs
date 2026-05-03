@@ -41,6 +41,19 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     [ObservableProperty] private string _sourceImagePath = "";
     [ObservableProperty] private bool _isProduction;
 
+    /// <summary>
+    /// True when the bound inbox item was built by merging 2+ separate
+    /// screenshots (Inbox → "Merge selected"). The view shows a warning
+    /// banner because UEX accepts only ONE screenshot per /data_submit POST,
+    /// so only the first source image is attached. New datarunners (90-day
+    /// evaluation) may see the submission rejected for rows whose visual
+    /// evidence isn't on that one attached screenshot.
+    /// </summary>
+    public bool IsMergedItem => _bound?.SourcePaths?.Count > 1;
+
+    /// <summary>How many source screenshots compose the bound item.</summary>
+    public int MergedSourceCount => _bound?.SourcePaths?.Count ?? 1;
+
     [ObservableProperty] private UexTerminal? _selectedTerminal;
     [ObservableProperty] private string _terminalSearch = "";
     [ObservableProperty] private bool _isTerminalDropDownOpen;
@@ -381,6 +394,11 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     {
         _bound = item;
         CanReRunOcr = true;
+        // Notify the view that the merged-item helpers may have changed: their
+        // backing data (_bound.SourcePaths.Count) just changed but the toolkit
+        // doesn't auto-detect that because they're computed properties.
+        OnPropertyChanged(nameof(IsMergedItem));
+        OnPropertyChanged(nameof(MergedSourceCount));
         // Each load resets the explicit-confirmation flags: the OCR's pre-pick
         // is a guess, not a commitment from the user. They must still confirm
         // (even if just by clicking the same terminal in the dropdown) when
