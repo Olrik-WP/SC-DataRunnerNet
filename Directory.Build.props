@@ -22,6 +22,17 @@
     <RepositoryUrl>https://github.com/Olrik-WP/SC-DataRunnerNet</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <NeutralLanguage>en</NeutralLanguage>
+
+    <!--
+      AGPL-3.0-or-later: this project is free software under the GNU Affero
+      General Public License version 3 or any later version. The full license
+      text is in /LICENSE at the repo root. SPDX identifiers below propagate
+      the licensing metadata to NuGet packages, the Windows binary's "About"
+      properties, and any tooling that scans the assembly attributes.
+    -->
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
+    <PackageLicenseFile></PackageLicenseFile>
+    <PackageProjectUrl>https://github.com/Olrik-WP/SC-DataRunnerNet</PackageProjectUrl>
   </PropertyGroup>
 
   <!-- Embed the source-revision (git SHA, set by CI) into InformationalVersion
