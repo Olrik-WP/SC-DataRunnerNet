@@ -134,6 +134,9 @@ public partial class App : Application
         var watcher = Host.Services.GetRequiredService<ScreenshotFolderWatcher>();
         inbox.OnRescanRequested = window => watcher.RescanAsync(window);
 
+        var settings = Host.Services.GetRequiredService<SettingsViewModel>();
+        inbox.GetScreenshotsFolderPath = () => settings.ScreenshotsFolder;
+
         await EnsureCatalogReadyAsync();
 
         var secretStore = Host.Services.GetRequiredService<ISecretKeyStore>();

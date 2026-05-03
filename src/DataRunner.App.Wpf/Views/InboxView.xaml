@@ -93,6 +93,12 @@
                                        ToolTip="Remove selected from inbox">
                                 <ui:SymbolIcon Symbol="Delete24" />
                             </ui:Button>
+                            <ui:Button Margin="8,0,0,0"
+                                       Command="{Binding OpenScreenshotsFolderCommand}"
+                                       Padding="10,7"
+                                       ToolTip="Open the screenshots folder in Explorer">
+                                <ui:SymbolIcon Symbol="FolderOpen24" />
+                            </ui:Button>
                         </StackPanel>
 
                         <!-- Merge action — visible only when 2+ items with successful OCR are selected.

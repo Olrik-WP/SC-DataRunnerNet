@@ -40,7 +40,7 @@
                                TextAlignment="Center" MaxWidth="500"
                                Text="This app reads your in-game commodity terminal screenshots, lets you review every value, and sends the results to UEX with one click. OCR runs entirely on your machine; nothing leaves before you press Send." />
                     <TextBlock Margin="0,8,0,0" HorizontalAlignment="Center" Opacity="0.7"
-                               Text="Open-source, free, MIT-licensed." />
+                               Text="Open-source, free, AGPL-3.0 licensed." />
                 </StackPanel>
 
                 <!-- User secret-key -->

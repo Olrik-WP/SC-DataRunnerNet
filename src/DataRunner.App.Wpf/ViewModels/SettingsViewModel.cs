@@ -228,6 +228,34 @@ public sealed partial class SettingsViewModel : ObservableObject
         HasSecretKey = await _secretStore.HasKeyAsync();
         HasBearerToken = await _secretStore.HasBearerTokenAsync();
         CatalogStatus = BuildCatalogStatus();
+
+        // Re-read prefs from disk so changes made OUTSIDE SettingsViewModel
+        // (eg. by the first-run wizard, which writes directly to IAppPreferences)
+        // are picked up. Without this the ScreenshotsFolder property stays at
+        // its constructor-time value even though prefs.json now has the folder
+        // the user picked in the wizard → the FileSystemWatcher (which listens
+        // on ScreenshotsFolder's PropertyChanged) never reconfigures and new
+        // screenshots are silently ignored until the user reopens Settings.
+        _isHydrating = true;
+        try
+        {
+            await _prefs.LoadAsync();
+            AttachScreenshotOnSubmit = _prefs.AttachScreenshotOnSubmit;
+            DeleteScreenshotAfterSubmit = _prefs.DeleteScreenshotAfterSubmit;
+            DefaultIsProduction = _prefs.DefaultIsProduction;
+
+            var freshFolder = _prefs.ScreenshotsFolder ?? DefaultScreenshotsFolder();
+            if (!string.Equals(ScreenshotsFolder, freshFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                _isHydrating = false;
+                ScreenshotsFolder = freshFolder;
+            }
+            UpdateScreenshotsFolderStatus(ScreenshotsFolder);
+        }
+        finally
+        {
+            _isHydrating = false;
+        }
     }
 
     [RelayCommand]

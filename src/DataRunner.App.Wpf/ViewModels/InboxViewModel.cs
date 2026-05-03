@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -75,6 +76,27 @@ public sealed partial class InboxViewModel : ObservableObject
     /// picked up, etc.).
     /// </summary>
     public Func<TimeSpan, Task<Services.ScreenshotFolderWatcher.RescanResult>>? OnRescanRequested { get; set; }
+
+    /// <summary>
+    /// Resolved at startup so the "Open screenshots folder" button can read
+    /// the user's configured path without taking a DI dependency on
+    /// <see cref="SettingsViewModel"/> (which would create a cycle).
+    /// </summary>
+    public Func<string?>? GetScreenshotsFolderPath { get; set; }
+
+    [RelayCommand]
+    private void OpenScreenshotsFolder()
+    {
+        var folder = GetScreenshotsFolderPath?.Invoke();
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+            return;
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = folder,
+            UseShellExecute = true,
+        });
+    }
 
     public InboxViewModel()
     {

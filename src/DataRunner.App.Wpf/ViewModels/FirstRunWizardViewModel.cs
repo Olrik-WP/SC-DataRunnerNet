@@ -86,10 +86,7 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
         }
         else
         {
-            var defaultFolder = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "Pictures", "Roberts Space Industries", "ScreenShots");
-            if (Directory.Exists(defaultFolder)) ScreenshotsFolder = defaultFolder;
+            ScreenshotsFolder = FindScScreenshotsFolder() ?? "";
         }
     }
 
@@ -168,6 +165,50 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
             return;
         }
         CurrentStep++;
+    }
+
+    /// <summary>
+    /// Probes several well-known locations for the SC Screenshots folder.
+    /// SC's screenshot path depends on the install drive chosen by the user,
+    /// so we check a few common roots. Returns the first one that exists
+    /// or <c>null</c> when none is found (the user will have to Browse).
+    /// </summary>
+    private static string? FindScScreenshotsFolder()
+    {
+        // Standard Roberts launcher path under user profile
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var candidates = new[]
+        {
+            Path.Combine(userProfile, "Pictures", "Roberts Space Industries", "ScreenShots"),
+        };
+
+        // Probe every fixed drive for <root>\StarCitizen\LIVE\Screenshots
+        // and <root>\Roberts Space Industries\StarCitizen\LIVE\Screenshots
+        // (the two most common install layouts).
+        foreach (var drive in DriveInfo.GetDrives())
+        {
+            if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
+            var root = drive.RootDirectory.FullName;
+            // D:\StarCitizen\LIVE\Screenshots  (or C:\, E:\, ...)
+            var p1 = Path.Combine(root, "StarCitizen", "LIVE", "Screenshots");
+            if (Directory.Exists(p1)) return p1;
+            // D:\Program Files\Roberts Space Industries\StarCitizen\LIVE\Screenshots
+            var p2 = Path.Combine(root, "Program Files", "Roberts Space Industries", "StarCitizen", "LIVE", "Screenshots");
+            if (Directory.Exists(p2)) return p2;
+            // D:\Jeux\StarCitizen\LIVE\Screenshots  (French installs)
+            var p3 = Path.Combine(root, "Jeux", "StarCitizen", "LIVE", "Screenshots");
+            if (Directory.Exists(p3)) return p3;
+            // D:\Games\StarCitizen\LIVE\Screenshots
+            var p4 = Path.Combine(root, "Games", "StarCitizen", "LIVE", "Screenshots");
+            if (Directory.Exists(p4)) return p4;
+        }
+
+        foreach (var c in candidates)
+        {
+            if (Directory.Exists(c)) return c;
+        }
+
+        return null;
     }
 
     [RelayCommand]
