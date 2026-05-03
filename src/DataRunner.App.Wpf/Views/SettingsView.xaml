@@ -252,6 +252,118 @@
                 </StackPanel>
             </ui:Card>
 
+            <!-- UPDATES & VERSION -->
+            <ui:Card Padding="22,18" Margin="0,0,0,16" DataContext="{Binding Updates}">
+                <StackPanel>
+                    <DockPanel>
+                        <ui:SymbolIcon Symbol="ArrowDownload24" />
+                        <TextBlock Text="Updates &amp; version"
+                                   FontSize="16" FontWeight="SemiBold"
+                                   Margin="10,0,0,0" VerticalAlignment="Center" />
+
+                        <Border DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                CornerRadius="10" Padding="10,3"
+                                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                            <TextBlock FontSize="11" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                <Run Text="Installed: v" /><Run Text="{Binding CurrentVersion, Mode=OneWay}" />
+                            </TextBlock>
+                        </Border>
+                    </DockPanel>
+
+                    <TextBlock Margin="0,8,0,4" Opacity="0.75" TextWrapping="Wrap"
+                               Text="The app checks GitHub Releases for new builds at startup and on demand. Downloads are delta-packed (only the bytes that changed) and applied on next launch with one click." />
+
+                    <!-- Status line + last-checked timestamp -->
+                    <DockPanel Margin="0,12,0,8">
+                        <TextBlock Text="{Binding StatusLabel}" FontSize="13" VerticalAlignment="Center" />
+                        <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                   Text="{Binding LastCheckedAt, StringFormat='Last checked: {0:t}', TargetNullValue='Never checked'}"
+                                   FontSize="11" Opacity="0.6" VerticalAlignment="Center" />
+                    </DockPanel>
+
+                    <!-- Download progress (only visible while Downloading) -->
+                    <ProgressBar Height="6" Margin="0,0,0,12"
+                                 Minimum="0" Maximum="100"
+                                 Value="{Binding DownloadProgress, Mode=OneWay}">
+                        <ProgressBar.Style>
+                            <Style TargetType="ProgressBar">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding State}" Value="Downloading">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ProgressBar.Style>
+                    </ProgressBar>
+
+                    <StackPanel Orientation="Horizontal">
+                        <ui:Button Appearance="Secondary" Padding="14,7" Margin="0,0,8,0"
+                                   Command="{Binding CheckCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="ArrowSync24" Margin="0,0,6,0" />
+                                <TextBlock Text="Check for updates" />
+                            </StackPanel>
+                        </ui:Button>
+
+                        <ui:Button Appearance="Primary" Padding="14,7" Margin="0,0,8,0"
+                                   Command="{Binding DownloadCommand}">
+                            <ui:Button.Style>
+                                <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding State}" Value="Available">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ui:Button.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="ArrowDownload24" Margin="0,0,6,0" />
+                                <TextBlock Text="Download update" />
+                            </StackPanel>
+                        </ui:Button>
+
+                        <ui:Button Appearance="Primary" Padding="14,7"
+                                   Command="{Binding ApplyAndRestartCommand}">
+                            <ui:Button.Style>
+                                <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding State}" Value="ReadyToApply">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ui:Button.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="ArrowReset24" Margin="0,0,6,0" />
+                                <TextBlock Text="Restart and apply" />
+                            </StackPanel>
+                        </ui:Button>
+                    </StackPanel>
+
+                    <!-- Dev-build hint: surface the reason why update controls
+                         appear inert when running from bin\Debug. -->
+                    <Border Margin="0,12,0,0" Padding="10,7" CornerRadius="4"
+                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                            Visibility="{Binding IsInstalled, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}">
+                        <DockPanel>
+                            <ui:SymbolIcon Symbol="Info16" Margin="0,0,8,0" Opacity="0.75" />
+                            <TextBlock TextWrapping="Wrap" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       Text="This is a developer build (not installed via the official setup). Auto-update is disabled — install the official release to receive updates from GitHub." />
+                        </DockPanel>
+                    </Border>
+
+                    <TextBlock Margin="0,10,0,0" FontSize="11" Opacity="0.7"
+                               Text="{Binding LastError}"
+                               Visibility="{Binding LastError, Converter={StaticResource BoolToVisibility}}"
+                               Foreground="#C0392B" />
+                </StackPanel>
+            </ui:Card>
+
             <!-- ABOUT / PRIVACY -->
             <ui:Card Padding="22,18" Margin="0,0,0,16">
                 <StackPanel>

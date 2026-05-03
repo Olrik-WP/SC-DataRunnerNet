@@ -12,6 +12,7 @@
     <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Debug" Version="3.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="Velopack" Version="0.0.1298" />
     <PackageReference Include="WPF-UI" Version="4.2.1" />
   </ItemGroup>
 
@@ -23,6 +24,23 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>DataRunner.App</RootNamespace>
     <AssemblyName>DataRunner.App</AssemblyName>
+    <ApplicationIcon Condition="Exists('Resources\app.ico')">Resources\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!--
+    Velopack requires an explicit, hand-written Main() so its install /
+    update / uninstall hooks can run BEFORE WPF spins up. We therefore
+    opt out of the SDK-generated entry point: App.xaml is demoted from
+    ApplicationDefinition (auto-Main) to Page (no auto-Main), and
+    StartupObject is pinned to the App class where Main() lives.
+  -->
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <StartupObject>DataRunner.App.App</StartupObject>
   </PropertyGroup>
 
 </Project>

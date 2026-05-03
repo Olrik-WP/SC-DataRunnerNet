@@ -20,6 +20,12 @@ obj/
 publish/
 out/
 
+# ---- Velopack release artifacts (built by scripts/release.ps1 and CI) ----
+releases/
+Releases/
+*.nupkg
+*.AppImage
+
 # ---- IDE / editor noise ----
 .idea/
 .vscode/*

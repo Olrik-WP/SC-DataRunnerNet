@@ -16,6 +16,12 @@ public sealed partial class SettingsViewModel : ObservableObject
     private readonly ILogger<SettingsViewModel> _logger;
 
     /// <summary>
+    /// Re-exposed so the Settings view can bind its "Updates" card to the
+    /// shared singleton instance (same one driving the status-bar pill).
+    /// </summary>
+    public UpdateViewModel Updates { get; }
+
+    /// <summary>
     /// Suppresses the partial-property change handlers during the constructor,
     /// so hydrating ScreenshotsFolder / AttachScreenshotOnSubmit from prefs
     /// does NOT trigger a redundant SaveAsync. Without this flag, the constructor
@@ -131,6 +137,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         ICatalogProvider catalog,
         IAppPreferences prefs,
         IDialogService dialog,
+        UpdateViewModel updates,
         ILogger<SettingsViewModel> logger)
     {
         _secretStore = secretStore;
@@ -138,6 +145,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _prefs = prefs;
         _dialog = dialog;
         _logger = logger;
+        Updates = updates;
 
         _ = RefreshAsync();
         _catalog.Refreshed += (_, _) => CatalogStatus = BuildCatalogStatus();

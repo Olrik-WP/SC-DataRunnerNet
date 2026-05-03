@@ -1,0 +1,106 @@
+name: Release (Velopack -> GitHub)
+
+# Triggers:
+#   - Pushing a tag of the form v1.2.3 publishes a stable release.
+#   - Manual dispatch lets us re-run a release if something glitched out.
+#
+# Versioning policy:
+#   The tag MUST match <Version> in Directory.Build.props. The job double-
+#   checks this and fails fast on mismatch, so we never ship a binary whose
+#   AssemblyInformationalVersion lies about itself.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  # Required so $GITHUB_TOKEN can create the GitHub Release and upload assets.
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      # Pull the canonical version from Directory.Build.props and confirm it
+      # matches the tag (when triggered by tag push).
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          [xml]$props = Get-Content Directory.Build.props
+          $v = ($props.Project.PropertyGroup.Version | Select-Object -First 1).Trim()
+          if (-not $v) { throw 'Version missing in Directory.Build.props' }
+
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $tag = $env:GITHUB_REF -replace '^refs/tags/v',''
+            if ($tag -ne $v) {
+              throw "Tag v$tag does not match Directory.Build.props <Version>=$v. Sync them and push a new tag."
+            }
+          }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Releasing v$v"
+
+      - name: Restore
+        run: dotnet restore SC-DataRunnerNet.sln
+
+      # Self-contained publish: ships the .NET runtime alongside the app so
+      # end users don't need to install .NET 9 separately. Velopack will
+      # delta-pack subsequent releases, so the runtime weight is paid once.
+      - name: Publish
+        run: >
+          dotnet publish src/DataRunner.App.Wpf/DataRunner.App.Wpf.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -o publish
+          /p:SourceRevisionId=${{ github.sha }}
+
+      - name: Install Velopack CLI
+        run: dotnet tool install -g vpk
+
+      # Pull the previous release so vpk can compute the delta package.
+      # First-ever release: this step exits non-zero, which is fine — we
+      # `continue-on-error` and let `vpk pack` build a full package.
+      - name: Download previous release
+        continue-on-error: true
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pack release
+        run: >
+          vpk pack
+          --packId SC-DataRunner
+          --packVersion ${{ steps.ver.outputs.version }}
+          --packDir publish
+          --mainExe DataRunner.App.exe
+          --channel win
+
+      - name: Upload to GitHub Releases
+        run: >
+          vpk upload github
+          --repoUrl https://github.com/${{ github.repository }}
+          --token ${{ secrets.GITHUB_TOKEN }}
+          --releaseName "SC DataRunner v${{ steps.ver.outputs.version }}"
+          --tag v${{ steps.ver.outputs.version }}
+          --channel win
+          --publish
+
+      - name: Upload pipeline artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: velopack-releases-v${{ steps.ver.outputs.version }}
+          path: |
+            Releases/**
+            publish/**
+          retention-days: 7

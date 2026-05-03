@@ -162,7 +162,36 @@
                 </StackPanel>
 
                 <!-- Spacer -->
-                <Grid Grid.Column="1" />
+                <Grid Grid.Column="1">
+                    <!-- UPDATE PILL: only visible when an update is available,
+                         downloading, ready to apply, or has failed. Clicking
+                         it advances the next step (download → apply). -->
+                    <Border HorizontalAlignment="Center" VerticalAlignment="Center"
+                            CornerRadius="10" Padding="10,3" Margin="8,0"
+                            Background="{DynamicResource AccentFillColorDefaultBrush}"
+                            Visibility="{Binding Updates.ShowInStatusBar, Converter={StaticResource BoolToVisibility}}">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Updates.State}" Value="Failed">
+                                        <Setter Property="Background" Value="#C0392B" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand"
+                                ToolTip="Open Settings to manage this update"
+                                Command="{Binding NavigateSettingsCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="13"
+                                               Foreground="White" Margin="0,0,6,0" />
+                                <TextBlock Text="{Binding Updates.StatusLabel}"
+                                           FontSize="11" Foreground="White"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </Border>
+                </Grid>
 
                 <!-- UEX catalog state -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">

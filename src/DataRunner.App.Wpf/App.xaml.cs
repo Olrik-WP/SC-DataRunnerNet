@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using DataRunner.App.Services;
 using DataRunner.App.ViewModels;
@@ -10,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
+using Velopack;
 
 namespace DataRunner.App;
 
@@ -19,13 +21,23 @@ public partial class App : Application
 
     public static T Resolve<T>() where T : notnull => Host.Services.GetRequiredService<T>();
 
-    protected override async void OnStartup(StartupEventArgs e)
+    /// <summary>
+    /// Custom WPF entry point.
+    /// <para>
+    /// We hand-roll Main() (instead of letting the SDK auto-generate it from
+    /// App.xaml) so <see cref="VelopackApp.Build"/> can run BEFORE any WPF
+    /// machinery. That window is non-negotiable: Velopack uses it to handle
+    /// silent first-install / update / uninstall hooks that must NOT spawn
+    /// a UI. If we let WPF start first, those hooks would briefly flash the
+    /// main window during installation.
+    /// </para>
+    /// </summary>
+    [STAThread]
+    public static void Main(string[] args)
     {
-        base.OnStartup(e);
-
-        var logsDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SC-DataRunnerNet", "logs");
+        // Surface unhandled crashes from the Velopack install hooks into the
+        // standard log file (logs are a folder under LocalAppData; see below).
+        var logsDir = ResolveLogsDir();
         Directory.CreateDirectory(logsDir);
 
         Log.Logger = new LoggerConfiguration()
@@ -37,6 +49,41 @@ public partial class App : Application
                 retainedFileCountLimit: 14)
             .CreateLogger();
 
+        try
+        {
+            // Velopack hooks (install / update / uninstall) terminate the
+            // process on their own when triggered by the installer; if we
+            // were *not* triggered by the installer, control falls through
+            // and we boot the app normally.
+            VelopackApp.Build()
+                .OnFirstRun(_ => Log.Information("Velopack: first-run hook fired (install completed)."))
+                .OnAfterUpdateFastCallback(v => Log.Information("Velopack: post-update hook for {Version}.", v))
+                .OnBeforeUninstallFastCallback(v => Log.Information("Velopack: pre-uninstall hook for {Version}.", v))
+                .Run();
+
+            var app = new App();
+            app.InitializeComponent();
+            app.Run();
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal(ex, "Fatal error during startup.");
+            throw;
+        }
+        finally
+        {
+            Log.CloseAndFlush();
+        }
+    }
+
+    private static string ResolveLogsDir() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "SC-DataRunnerNet", "logs");
+
+    protected override async void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+
         Host = Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder()
             .UseSerilog()
             .ConfigureServices((_, services) =>
@@ -46,6 +93,7 @@ public partial class App : Application
 
                 services.AddSingleton<INavigationService, NavigationService>();
                 services.AddSingleton<IDialogService, DialogService>();
+                services.AddSingleton<IUpdateService, VelopackUpdateService>();
                 services.AddSingleton<OcrCoordinator>();
                 services.AddSingleton<ScreenshotFolderWatcher>();
                 services.AddHostedService(sp => sp.GetRequiredService<ScreenshotFolderWatcher>());
@@ -55,6 +103,7 @@ public partial class App : Application
                 services.AddSingleton<SettingsViewModel>();
                 services.AddSingleton<HistoryViewModel>();
                 services.AddSingleton<TargetsViewModel>();
+                services.AddSingleton<UpdateViewModel>();
                 services.AddSingleton<FirstRunWizardViewModel>();
                 services.AddTransient<ScreenshotEditViewModel>();
 
@@ -103,6 +152,11 @@ public partial class App : Application
         }
 
         mainWindow.Show();
+
+        // Fire-and-forget background update probe. Errors are logged inside
+        // the service; we never block startup or interrupt the user.
+        _ = Host.Services.GetRequiredService<UpdateViewModel>()
+            .CheckForUpdatesSilentlyAsync();
     }
 
     /// <summary>
@@ -142,6 +196,24 @@ public partial class App : Application
             Host.Services.GetRequiredService<ILogger<App>>()
                 .LogWarning(ex, "Catalog warm-up failed; UI will retry on demand.");
         }
+    }
+
+    /// <summary>
+    /// Best-effort: returns the SemVer string baked into the assembly by
+    /// Directory.Build.props at compile time. Falls back to "0.0.0" on dev
+    /// builds where attributes have been stripped.
+    /// </summary>
+    public static string GetAppVersion()
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(info))
+        {
+            // Strip the "+<sha>" suffix when present so the UI shows "1.2.3".
+            var plus = info.IndexOf('+');
+            return plus > 0 ? info[..plus] : info;
+        }
+        return asm.GetName().Version?.ToString(3) ?? "0.0.0";
     }
 
     protected override async void OnExit(ExitEventArgs e)

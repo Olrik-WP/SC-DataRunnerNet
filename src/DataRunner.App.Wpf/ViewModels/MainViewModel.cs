@@ -20,6 +20,7 @@ public sealed partial class MainViewModel : ObservableObject
     public HistoryViewModel History { get; }
     public TargetsViewModel Targets { get; }
     public FirstRunWizardViewModel FirstRun { get; }
+    public UpdateViewModel Updates { get; }
     public OcrCoordinator Ocr { get; }
 
     public MainViewModel(
@@ -29,6 +30,7 @@ public sealed partial class MainViewModel : ObservableObject
         HistoryViewModel history,
         TargetsViewModel targets,
         FirstRunWizardViewModel firstRun,
+        UpdateViewModel updates,
         OcrCoordinator ocr)
     {
         _nav = nav;
@@ -37,6 +39,7 @@ public sealed partial class MainViewModel : ObservableObject
         History = history;
         Targets = targets;
         FirstRun = firstRun;
+        Updates = updates;
         Ocr = ocr;
 
         FirstRun.PropertyChanged += (_, e) =>
