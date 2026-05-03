@@ -49,6 +49,33 @@ public sealed class SqliteSubmissionHistory : ISubmissionHistory
             CREATE INDEX IF NOT EXISTS ix_submissions_terminal_at ON submissions (id_terminal, at_unix_seconds DESC);
             """;
         await cmd.ExecuteNonQueryAsync(ct);
+
+        // Schema migration: add `source_images` (JSON array of filenames) for
+        // merged submissions. Safe to call repeatedly: SQLite's PRAGMA + INFO
+        // check tells us whether the column already exists. We don't backfill
+        // legacy rows — `GetSubmittedSourceImagesAsync` falls back to
+        // source_image when source_images is NULL.
+        if (!await ColumnExistsAsync(conn, "submissions", "source_images", ct))
+        {
+            await using var alter = conn.CreateCommand();
+            alter.CommandText = "ALTER TABLE submissions ADD COLUMN source_images TEXT NULL;";
+            await alter.ExecuteNonQueryAsync(ct);
+        }
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SqliteConnection conn, string table, string column, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info({table});";
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            // PRAGMA table_info layout: cid, name, type, notnull, dflt_value, pk
+            if (string.Equals(r.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     public async Task<long> RecordAsync(SubmissionRecord record, CancellationToken ct = default)
@@ -59,10 +86,10 @@ public sealed class SqliteSubmissionHistory : ISubmissionHistory
         cmd.CommandText = """
             INSERT INTO submissions
               (at_unix_seconds, id_terminal, terminal_display_name, is_production, ok,
-               http_status_code, api_status, api_message, source_image,
+               http_status_code, api_status, api_message, source_image, source_images,
                request_json, response_json, submitted_commodity_ids)
             VALUES
-              ($at, $term, $name, $prod, $ok, $code, $status, $msg, $img, $req, $resp, $ids);
+              ($at, $term, $name, $prod, $ok, $code, $status, $msg, $img, $imgs, $req, $resp, $ids);
             SELECT last_insert_rowid();
             """;
         cmd.Parameters.AddWithValue("$at", record.At.ToUnixTimeSeconds());
@@ -74,6 +101,13 @@ public sealed class SqliteSubmissionHistory : ISubmissionHistory
         cmd.Parameters.AddWithValue("$status", (object?)record.ApiStatus ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$msg", (object?)record.ApiMessage ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$img", (object?)record.SourceImage ?? DBNull.Value);
+        // SourceImages is empty for legacy callers / single-shot pre-merge code.
+        // Don't persist an empty JSON array as it adds nothing — keep NULL so
+        // the union query in GetSubmittedSourceImagesAsync stays cheap.
+        var imgsJson = (record.SourceImages?.Count ?? 0) > 0
+            ? (object)JsonSerializer.Serialize(record.SourceImages)
+            : DBNull.Value;
+        cmd.Parameters.AddWithValue("$imgs", imgsJson);
         cmd.Parameters.AddWithValue("$req", record.RequestJson);
         cmd.Parameters.AddWithValue("$resp", record.ResponseJson);
         cmd.Parameters.AddWithValue("$ids", JsonSerializer.Serialize(record.SubmittedCommodityIds));
@@ -94,7 +128,7 @@ public sealed class SqliteSubmissionHistory : ISubmissionHistory
         cmd.CommandText = """
             SELECT id, at_unix_seconds, id_terminal, terminal_display_name, is_production, ok,
                    http_status_code, api_status, api_message, source_image,
-                   request_json, response_json, submitted_commodity_ids
+                   request_json, response_json, submitted_commodity_ids, source_images
             FROM submissions
             WHERE id_terminal = $term AND at_unix_seconds >= $since
             ORDER BY at_unix_seconds DESC;
@@ -113,7 +147,7 @@ public sealed class SqliteSubmissionHistory : ISubmissionHistory
         cmd.CommandText = """
             SELECT id, at_unix_seconds, id_terminal, terminal_display_name, is_production, ok,
                    http_status_code, api_status, api_message, source_image,
-                   request_json, response_json, submitted_commodity_ids
+                   request_json, response_json, submitted_commodity_ids, source_images
             FROM submissions
             ORDER BY at_unix_seconds DESC
             LIMIT $limit;
@@ -128,30 +162,47 @@ public sealed class SqliteSubmissionHistory : ISubmissionHistory
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
 
-        // Distinct so a file submitted multiple times only appears once. We
-        // filter on `ok = 1` because an HTTP 4xx / 5xx response means UEX did
-        // NOT accept the data — the user should be able to re-process the
+        // We pull BOTH columns in one query and union them in memory:
+        //   - source_image   : single primary filename (always populated)
+        //   - source_images  : JSON array of all merged sources (populated for
+        //                      merged submissions; NULL for legacy / single-shot)
+        // The union ensures stragglers from a merge are also skipped at rescan.
+        // We filter on `ok = 1` because an HTTP 4xx / 5xx response means UEX
+        // did NOT accept the data — the user should be able to re-process the
         // screenshot, fix issues, and re-submit.
-        if (productionOnly)
-        {
-            cmd.CommandText = """
-                SELECT DISTINCT source_image FROM submissions
-                WHERE ok = 1 AND is_production = 1 AND source_image IS NOT NULL AND source_image <> '';
-                """;
-        }
-        else
-        {
-            cmd.CommandText = """
-                SELECT DISTINCT source_image FROM submissions
-                WHERE ok = 1 AND source_image IS NOT NULL AND source_image <> '';
-                """;
-        }
+        var prodFilter = productionOnly ? "AND is_production = 1" : "";
+        cmd.CommandText = $"""
+            SELECT source_image, source_images FROM submissions
+            WHERE ok = 1 {prodFilter};
+            """;
 
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            set.Add(reader.GetString(0));
+            if (!reader.IsDBNull(0))
+            {
+                var primary = reader.GetString(0);
+                if (!string.IsNullOrWhiteSpace(primary)) set.Add(primary);
+            }
+            if (!reader.IsDBNull(1))
+            {
+                var json = reader.GetString(1);
+                try
+                {
+                    var arr = JsonSerializer.Deserialize<List<string>>(json);
+                    if (arr is null) continue;
+                    foreach (var name in arr)
+                    {
+                        if (!string.IsNullOrWhiteSpace(name)) set.Add(name);
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Corrupted JSON — skip silently; the primary column already
+                    // gives us the most important entry for that row.
+                }
+            }
         }
         return set;
     }
@@ -163,6 +214,7 @@ public sealed class SqliteSubmissionHistory : ISubmissionHistory
         while (await reader.ReadAsync(ct))
         {
             var idsJson = reader.GetString(12);
+            var imgsJson = reader.IsDBNull(13) ? null : reader.GetString(13);
             list.Add(new SubmissionRecord
             {
                 Id = reader.GetInt64(0),
@@ -178,6 +230,9 @@ public sealed class SqliteSubmissionHistory : ISubmissionHistory
                 RequestJson = reader.GetString(10),
                 ResponseJson = reader.GetString(11),
                 SubmittedCommodityIds = JsonSerializer.Deserialize<List<int>>(idsJson) ?? new(),
+                SourceImages = imgsJson is null
+                    ? new()
+                    : JsonSerializer.Deserialize<List<string>>(imgsJson) ?? new(),
             });
         }
         return list;

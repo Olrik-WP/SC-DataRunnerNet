@@ -12,6 +12,17 @@ public interface ICatalogProvider
     IReadOnlyList<UexCommodity> Commodities { get; }
     IReadOnlyList<UexTerminal> CommodityTerminals { get; }
 
+    /// <summary>
+    /// Case-insensitive set of terminal display names that exist in MORE THAN ONE
+    /// star system (e.g. "Pyro Gateway" in Stanton AND in Pyro). The UI uses this
+    /// to force the user to explicitly disambiguate before submitting — a major
+    /// source of bad data per UEX community feedback.
+    /// </summary>
+    IReadOnlySet<string> AmbiguousTerminalNames { get; }
+
+    /// <summary>True if the given terminal's display name is ambiguous (see above).</summary>
+    bool IsAmbiguous(UexTerminal terminal);
+
     UexCommodity? GetCommodity(int id);
     UexTerminal? GetTerminal(int id);
 

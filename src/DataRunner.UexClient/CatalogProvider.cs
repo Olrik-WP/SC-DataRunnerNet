@@ -20,6 +20,8 @@ public sealed class CatalogProvider : ICatalogProvider
     private readonly Dictionary<int, UexTerminal> _terminalsById = new();
     private readonly object _gate = new();
 
+    private HashSet<string> _ambiguousNames = new(StringComparer.OrdinalIgnoreCase);
+
     public CatalogProvider(IUexApiClient api, ILogger<CatalogProvider> logger,
         string? cacheDir = null, TimeSpan? maxAge = null)
     {
@@ -35,6 +37,19 @@ public sealed class CatalogProvider : ICatalogProvider
     public IReadOnlyList<UexCommodity> Commodities { get; private set; } = Array.Empty<UexCommodity>();
     public IReadOnlyList<UexTerminal> CommodityTerminals { get; private set; } = Array.Empty<UexTerminal>();
 
+    public IReadOnlySet<string> AmbiguousTerminalNames
+    {
+        get { lock (_gate) return _ambiguousNames; }
+    }
+
+    public bool IsAmbiguous(UexTerminal terminal)
+    {
+        if (terminal is null) return false;
+        var key = !string.IsNullOrWhiteSpace(terminal.DisplayName) ? terminal.DisplayName : terminal.Name;
+        if (string.IsNullOrWhiteSpace(key)) return false;
+        lock (_gate) return _ambiguousNames.Contains(key);
+    }
+
     public event EventHandler? Refreshed;
 
     public UexCommodity? GetCommodity(int id)
@@ -45,6 +60,33 @@ public sealed class CatalogProvider : ICatalogProvider
     public UexTerminal? GetTerminal(int id)
     {
         lock (_gate) return _terminalsById.GetValueOrDefault(id);
+    }
+
+    /// <summary>
+    /// Recomputes the set of terminal display names that exist in 2+ star systems.
+    /// Called after every catalog load (disk OR API) so the lookup is always
+    /// consistent with the in-memory <see cref="CommodityTerminals"/> list.
+    /// MUST be called while holding <see cref="_gate"/>.
+    /// </summary>
+    private void RebuildAmbiguousNamesNoLock()
+    {
+        var byName = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in CommodityTerminals)
+        {
+            var key = !string.IsNullOrWhiteSpace(t.DisplayName) ? t.DisplayName : t.Name;
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            var sys = t.StarSystemName ?? "";
+            if (!byName.TryGetValue(key, out var systems))
+            {
+                systems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                byName[key] = systems;
+            }
+            systems.Add(sys);
+        }
+        _ambiguousNames = byName
+            .Where(kv => kv.Value.Count >= 2)
+            .Select(kv => kv.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<bool> RefreshAsync(bool force = false, CancellationToken ct = default)
@@ -69,6 +111,7 @@ public sealed class CatalogProvider : ICatalogProvider
             foreach (var c in commodities) _commoditiesById[c.Id] = c;
             foreach (var t in terminals) _terminalsById[t.Id] = t;
             LastRefreshedAt = DateTimeOffset.UtcNow;
+            RebuildAmbiguousNamesNoLock();
         }
 
         await SaveToDiskAsync(commodities, terminals, ct).ConfigureAwait(false);
@@ -104,6 +147,7 @@ public sealed class CatalogProvider : ICatalogProvider
                 _terminalsById.Clear();
                 foreach (var c in commEnv.Data) _commoditiesById[c.Id] = c;
                 foreach (var t in termEnv.Data) _terminalsById[t.Id] = t;
+                RebuildAmbiguousNamesNoLock();
             }
 
             if (File.Exists(metaPath))

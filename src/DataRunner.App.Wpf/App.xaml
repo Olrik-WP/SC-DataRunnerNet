@@ -19,6 +19,8 @@
             <conv:SmartNumberConverter x:Key="SmartNumber" />
             <conv:RelativeTimeConverter x:Key="RelativeTime" />
             <conv:DaysStaleToBrushConverter x:Key="DaysStaleToBrush" />
+            <conv:InboxStatusToBrushConverter x:Key="InboxStatusToBrush" />
+            <conv:InboxStatusToDotBrushConverter x:Key="InboxStatusToDot" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

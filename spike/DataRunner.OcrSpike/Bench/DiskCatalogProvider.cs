@@ -18,6 +18,7 @@ public sealed class DiskCatalogProvider : ICatalogProvider
     public IReadOnlyList<UexCommodity> Commodities { get; }
     public IReadOnlyList<UexTerminal> CommodityTerminals { get; }
     public DateTimeOffset? LastRefreshedAt { get; }
+    public IReadOnlySet<string> AmbiguousTerminalNames { get; }
 
     public event EventHandler? Refreshed { add { } remove { } }
 
@@ -31,6 +32,32 @@ public sealed class DiskCatalogProvider : ICatalogProvider
         LastRefreshedAt = lastRefreshedAt;
         _commoditiesById = commodities.ToDictionary(c => c.Id);
         _terminalsById = terminals.ToDictionary(t => t.Id);
+
+        // Same logic as the production CatalogProvider — keep them in sync so
+        // the spike benchmarks reflect the real ambiguity surface.
+        var byName = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in terminals)
+        {
+            var key = !string.IsNullOrWhiteSpace(t.DisplayName) ? t.DisplayName : t.Name;
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            if (!byName.TryGetValue(key, out var systems))
+            {
+                systems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                byName[key] = systems;
+            }
+            systems.Add(t.StarSystemName ?? "");
+        }
+        AmbiguousTerminalNames = byName
+            .Where(kv => kv.Value.Count >= 2)
+            .Select(kv => kv.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public bool IsAmbiguous(UexTerminal terminal)
+    {
+        if (terminal is null) return false;
+        var key = !string.IsNullOrWhiteSpace(terminal.DisplayName) ? terminal.DisplayName : terminal.Name;
+        return !string.IsNullOrWhiteSpace(key) && AmbiguousTerminalNames.Contains(key);
     }
 
     public static DiskCatalogProvider LoadFromCache(string cacheDir)

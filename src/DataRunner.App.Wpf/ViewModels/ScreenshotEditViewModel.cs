@@ -1,10 +1,13 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.IO;
 using System.Text.Json;
 using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DataRunner.App.Services;
+using DataRunner.App.ViewModels.Validation;
 using DataRunner.Core.Abstractions;
 using DataRunner.Core.Models;
 using DataRunner.UexClient;
@@ -54,6 +57,47 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(ReRunOcrCommand))]
     private bool _canReRunOcr;
 
+    /// <summary>
+    /// True if <see cref="SelectedTerminal"/> shares its display name with another
+    /// terminal in a different star system. UI surfaces a warning + inline picker.
+    /// </summary>
+    [ObservableProperty] private bool _isAmbiguousTerminal;
+
+    /// <summary>
+    /// Whether the user has explicitly picked / confirmed the terminal in the
+    /// dropdown (versus inheriting whatever the OCR guessed). Only matters when
+    /// the terminal name is ambiguous — in which case Send is gated until the
+    /// user confirms even by re-clicking the same one. Reset on every OCR
+    /// re-run / load so a fresh OCR guess is never silently trusted.
+    /// </summary>
+    [ObservableProperty] private bool _userExplicitlyConfirmedTerminal;
+
+    /// <summary>List of candidate terminals when the picked name is ambiguous (count ≥ 2).</summary>
+    public ObservableCollection<UexTerminal> AmbiguousCandidates { get; } = new();
+
+    /// <summary>
+    /// Live (incremental) validation issues — recomputed whenever any user-editable
+    /// field changes. Drives the sticky validation footer AND the Send button gate.
+    /// </summary>
+    public ObservableCollection<LiveValidationIssue> ValidationIssues { get; } = new();
+
+    [ObservableProperty] private int _errorCount;
+    [ObservableProperty] private int _warningCount;
+
+    /// <summary>True when at least one validation Error is present. Disables Send.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
+    private bool _hasBlockingErrors;
+
+    /// <summary>Concise summary line for the footer (e.g. "2 errors · 1 warning").</summary>
+    [ObservableProperty] private string _validationSummary = "";
+
+    /// <summary>
+    /// Overall severity name for the validation panel — feeds <c>SeverityToBrushConverter</c>.
+    /// "Error" if any error, "Warning" if any warning only, "Ok" if all clean.
+    /// </summary>
+    [ObservableProperty] private string _overallSeverity = "Ok";
+
     public ObservableCollection<EditableRow> Rows { get; } = new();
     public ObservableCollection<UexTerminal> TerminalSuggestions { get; } = new();
     public ObservableCollection<UexCommodity> CommodityOptions { get; } = new();
@@ -81,12 +125,247 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
 
         foreach (var c in _catalog.Commodities.OrderBy(c => c.Name))
             CommodityOptions.Add(c);
+
+        // Live validation: re-run on every relevant change. We hook three sources:
+        //   - the Rows collection itself (add/remove)
+        //   - each row's PropertyChanged (commodity / scu / price / status)
+        //   - the top-level header fields (terminal, tab) handled by partial methods below.
+        Rows.CollectionChanged += OnRowsCollectionChanged;
+        RecomputeValidation();
     }
+
+    private void OnRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+            foreach (EditableRow r in e.OldItems) r.PropertyChanged -= OnAnyRowPropertyChanged;
+        if (e.NewItems is not null)
+            foreach (EditableRow r in e.NewItems) r.PropertyChanged += OnAnyRowPropertyChanged;
+        RecomputeValidation();
+    }
+
+    private void OnAnyRowPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // Skip the cosmetic-only computed properties to avoid infinite recursion.
+        if (e.PropertyName is nameof(EditableRow.MatchSeverity)
+            or nameof(EditableRow.ScuIsEmpty)
+            or nameof(EditableRow.PriceIsEmpty)
+            or nameof(EditableRow.CommodityIsMissing))
+        {
+            return;
+        }
+        RecomputeValidation();
+    }
+
+    partial void OnSelectedTerminalChanged(UexTerminal? value)
+    {
+        // Always recompute ambiguity / candidates regardless of who triggered the
+        // change (OCR hydration vs user click), so the warning UI is consistent.
+        UpdateAmbiguityState(value);
+
+        if (_suspendSearchSync || value is null)
+        {
+            // Hydration path (OCR pre-fill or .Load()). We do NOT mark this as
+            // a user confirmation: if the terminal is ambiguous, the user must
+            // still pick one explicitly before Send is unlocked.
+            RecomputeValidation();
+            return;
+        }
+
+        // Real user pick from the dropdown.
+        UserExplicitlyConfirmedTerminal = true;
+
+        _suspendSearchSync = true;
+        TerminalSearch = value.DisplayName;
+        _suspendSearchSync = false;
+        IsTerminalDropDownOpen = false;
+        RecomputeValidation();
+    }
+
+    private void UpdateAmbiguityState(UexTerminal? value)
+    {
+        AmbiguousCandidates.Clear();
+        if (value is null)
+        {
+            IsAmbiguousTerminal = false;
+            return;
+        }
+        IsAmbiguousTerminal = _catalog.IsAmbiguous(value);
+        if (!IsAmbiguousTerminal) return;
+
+        var key = !string.IsNullOrWhiteSpace(value.DisplayName) ? value.DisplayName : value.Name;
+        foreach (var t in _catalog.CommodityTerminals
+                     .Where(t => string.Equals(
+                         !string.IsNullOrWhiteSpace(t.DisplayName) ? t.DisplayName : t.Name,
+                         key, StringComparison.OrdinalIgnoreCase))
+                     .OrderBy(t => t.StarSystemName))
+        {
+            AmbiguousCandidates.Add(t);
+        }
+    }
+
+    partial void OnTabChanged(TerminalTab value) => RecomputeValidation();
+    partial void OnTerminalMatchScoreChanged(double value) => RecomputeValidation();
+    partial void OnUserExplicitlyConfirmedTerminalChanged(bool value) => RecomputeValidation();
+    partial void OnIsAmbiguousTerminalChanged(bool value) => RecomputeValidation();
+
+    /// <summary>
+    /// Walks the current state and rebuilds the issue list. Cheap (sync, no I/O).
+    /// Single source of truth for the Send-button gate AND the footer panel.
+    /// </summary>
+    private void RecomputeValidation()
+    {
+        ValidationIssues.Clear();
+
+        if (SelectedTerminal is null)
+        {
+            ValidationIssues.Add(new LiveValidationIssue
+            {
+                Severity = LiveValidationSeverity.Error,
+                Code = "terminal_missing",
+                Message = "No terminal picked. Select one in the TERMINAL field.",
+            });
+        }
+        else
+        {
+            // CRITICAL UEX QUALITY RULE: when the same terminal name exists in
+            // multiple star systems (Pyro Gateway in Stanton vs Pyro, ARC-L1 vs
+            // CRU-L1, etc.), the user MUST explicitly pick one — otherwise the
+            // OCR's blind guess can pollute UEX with cross-system bad data.
+            // See UEX community feedback: this is the #1 source of bad reports.
+            if (IsAmbiguousTerminal && !UserExplicitlyConfirmedTerminal)
+            {
+                ValidationIssues.Add(new LiveValidationIssue
+                {
+                    Severity = LiveValidationSeverity.Error,
+                    Code = "terminal_ambiguous_unconfirmed",
+                    Message = $"\"{SelectedTerminal.DisplayName}\" exists in multiple star systems — pick the correct one in the dropdown to confirm.",
+                });
+            }
+
+            if (TerminalMatchScore > 0 && TerminalMatchScore < 80)
+            {
+                ValidationIssues.Add(new LiveValidationIssue
+                {
+                    Severity = LiveValidationSeverity.Warning,
+                    Code = "terminal_low_match",
+                    Message = $"Terminal OCR match is only {TerminalMatchScore:0}% — double-check the terminal name.",
+                });
+            }
+        }
+
+        if (Rows.Count == 0)
+        {
+            ValidationIssues.Add(new LiveValidationIssue
+            {
+                Severity = LiveValidationSeverity.Error,
+                Code = "no_rows",
+                Message = "No commodity rows. Add at least one row before submitting.",
+            });
+        }
+
+        // Per-row checks — produced in row order so the footer reads top-down.
+        for (var i = 0; i < Rows.Count; i++)
+        {
+            var r = Rows[i];
+            var label = r.Commodity?.Name ?? $"Row {i + 1}";
+
+            if (r.CommodityIsMissing)
+            {
+                ValidationIssues.Add(new LiveValidationIssue
+                {
+                    Severity = LiveValidationSeverity.Error,
+                    Code = "row_no_commodity",
+                    Message = $"Row {i + 1}: no commodity selected.",
+                    RowIndex = i,
+                });
+                continue;
+            }
+
+            if (r.MatchScore > 0 && r.MatchScore < 85)
+            {
+                ValidationIssues.Add(new LiveValidationIssue
+                {
+                    Severity = LiveValidationSeverity.Error,
+                    Code = "row_match_too_low",
+                    Message = $"{label}: OCR match too low ({r.MatchScore:0}%) — pick the correct commodity.",
+                    RowIndex = i,
+                });
+            }
+            else if (r.MatchScore > 0 && r.MatchScore < 100)
+            {
+                // Even 98% can be a wrong commodity (e.g. "Stims" → "Tins").
+                // We don't block but we ALWAYS warn so the user double-checks.
+                ValidationIssues.Add(new LiveValidationIssue
+                {
+                    Severity = LiveValidationSeverity.Warning,
+                    Code = "row_match_imperfect",
+                    Message = $"{label}: OCR match {r.MatchScore:0}% (not 100%) — verify the commodity name (OCR read: \"{r.FromOcr}\").",
+                    RowIndex = i,
+                });
+            }
+
+            if (r.ScuIsEmpty)
+            {
+                ValidationIssues.Add(new LiveValidationIssue
+                {
+                    Severity = LiveValidationSeverity.Error,
+                    Code = "row_scu_missing",
+                    Message = $"{label}: SCU value is missing.",
+                    RowIndex = i,
+                });
+            }
+
+            if (r.PriceIsEmpty)
+            {
+                ValidationIssues.Add(new LiveValidationIssue
+                {
+                    Severity = LiveValidationSeverity.Error,
+                    Code = "row_price_missing",
+                    Message = $"{label}: price is missing.",
+                    RowIndex = i,
+                });
+            }
+
+            if (r.Status == InventoryStatus.Unknown)
+            {
+                ValidationIssues.Add(new LiveValidationIssue
+                {
+                    Severity = LiveValidationSeverity.Warning,
+                    Code = "row_status_unknown",
+                    Message = $"{label}: inventory status is Unknown — pick one.",
+                    RowIndex = i,
+                });
+            }
+        }
+
+        ErrorCount = ValidationIssues.Count(v => v.Severity == LiveValidationSeverity.Error);
+        WarningCount = ValidationIssues.Count(v => v.Severity == LiveValidationSeverity.Warning);
+        HasBlockingErrors = ErrorCount > 0;
+        OverallSeverity = ErrorCount > 0 ? "Error" : (WarningCount > 0 ? "Warning" : "Ok");
+
+        ValidationSummary = (ErrorCount, WarningCount) switch
+        {
+            (0, 0) => "Ready to submit.",
+            (0, 1) => "1 warning — submission allowed.",
+            (0, var w) => $"{w} warnings — submission allowed.",
+            (1, 0) => "1 error blocks submission.",
+            (var e, 0) => $"{e} errors block submission.",
+            (1, 1) => "1 error · 1 warning — fix the error to enable Send.",
+            (var e, var w) => $"{e} errors · {w} warnings — fix errors to enable Send.",
+        };
+    }
+
+    private bool CanSubmit() => !HasBlockingErrors;
 
     public void Load(InboxItem item)
     {
         _bound = item;
         CanReRunOcr = true;
+        // Each load resets the explicit-confirmation flag: the OCR's pre-pick
+        // is a guess, not a commitment from the user. They must still confirm
+        // (even if just by clicking the same terminal in the dropdown) when
+        // the terminal name is ambiguous.
+        UserExplicitlyConfirmedTerminal = false;
         SourceImagePath = item.ImagePath;
         try
         {
@@ -171,18 +450,10 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedTerminalChanged(UexTerminal? value)
-    {
-        if (_suspendSearchSync || value is null) return;
-        _suspendSearchSync = true;
-        TerminalSearch = value.DisplayName;
-        _suspendSearchSync = false;
-        IsTerminalDropDownOpen = false;
-    }
-
     private void UpdateTerminalSuggestions()
     {
         TerminalSuggestions.Clear();
+
         IEnumerable<UexTerminal> source = _catalog.CommodityTerminals;
         if (!string.IsNullOrWhiteSpace(TerminalSearch))
         {
@@ -196,7 +467,26 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
                 Contains(t.OutpostName, q) ||
                 Contains(t.CityName, q));
         }
-        foreach (var t in source.OrderBy(t => t.DisplayName).Take(50))
+
+        // When the currently-selected terminal is ambiguous, ALWAYS surface every
+        // candidate sharing its name first — even if those don't match the search
+        // string — so the user can disambiguate in one click without having to
+        // scroll or re-type. This is the UEX community fix for the Gateway issue.
+        var pinned = new List<UexTerminal>();
+        var pinnedIds = new HashSet<int>();
+        if (IsAmbiguousTerminal && AmbiguousCandidates.Count > 0)
+        {
+            foreach (var c in AmbiguousCandidates.OrderBy(t => t.StarSystemName))
+            {
+                pinned.Add(c);
+                pinnedIds.Add(c.Id);
+            }
+        }
+
+        foreach (var t in pinned) TerminalSuggestions.Add(t);
+        foreach (var t in source.Where(t => !pinnedIds.Contains(t.Id))
+                                 .OrderBy(t => t.RichDisplayName)
+                                 .Take(50))
         {
             TerminalSuggestions.Add(t);
         }
@@ -226,11 +516,14 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     private void ReRunOcr()
     {
         if (_bound is null) return;
+        // A fresh OCR run is a fresh guess: any prior user confirmation is no
+        // longer valid for the new (potentially different) terminal pick.
+        UserExplicitlyConfirmedTerminal = false;
         _logger.LogInformation("Manual re-run OCR requested for {Path}", _bound.ImagePath);
         _ocr.Reprocess(_bound);
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanSubmit))]
     private async Task SubmitAsync()
     {
         var payload = BuildPayload();
@@ -268,6 +561,21 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         try
         {
             var result = await _api.SubmitDataAsync(payload);
+
+            // Resolve the FULL list of source files this submission represents.
+            // For a single-shot import that's [SourceImagePath]; for a merged
+            // item it's all the merged file paths. We pass basenames to the
+            // history (UEX only sees one anyway) so the watcher can match
+            // against DirectoryInfo.EnumerateFiles().Name later.
+            var allSourcePaths = (_bound?.SourcePaths is { Count: > 0 } sp)
+                ? sp
+                : new List<string> { SourceImagePath };
+            var allSourceNames = allSourcePaths
+                .Select(Path.GetFileName)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Select(n => n!)
+                .ToList();
+
             await _history.RecordAsync(new SubmissionRecord
             {
                 IdTerminal = payload.IdTerminal,
@@ -278,21 +586,28 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
                 ApiStatus = result.Status,
                 ApiMessage = result.Message,
                 SourceImage = Path.GetFileName(SourceImagePath),
+                SourceImages = allSourceNames,
                 RequestJson = result.SerialisedRequestBody,
                 ResponseJson = result.RawResponseBody,
                 SubmittedCommodityIds = payload.Prices.Select(p => p.IdCommodity).ToList(),
             });
 
-            // Try to delete the source .png if the user opted in. Only on
+            // Try to delete EVERY source .png if the user opted in. Only on
             // PRODUCTION submissions and only if the API accepted them — never
-            // on test or failed submissions (those should remain editable / retryable).
-            var deleted = false;
+            // on test or failed submissions (those should remain editable /
+            // retryable). For merged items, this wipes all 2-3 source files in
+            // one shot rather than leaving stragglers in the watched folder.
+            var deletedCount = 0;
             if (result.Ok
                 && payload.IsProduction == 1
                 && _prefs.DeleteScreenshotAfterSubmit
-                && !string.IsNullOrWhiteSpace(SourceImagePath))
+                && allSourcePaths.Count > 0)
             {
-                deleted = TryDeleteSourceFile(SourceImagePath);
+                foreach (var p in allSourcePaths)
+                {
+                    if (!string.IsNullOrWhiteSpace(p) && TryDeleteSourceFile(p))
+                        deletedCount++;
+                }
             }
 
             if (_bound is not null)
@@ -300,18 +615,35 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
                 _bound.Status = result.Ok ? InboxStatus.Sent : InboxStatus.Failed;
                 _bound.StatusReason = result.Ok
                     ? (payload.IsProduction == 1
-                        ? (deleted ? "Sent (production) · file deleted" : "Sent (production)")
+                        ? (deletedCount > 0
+                            ? (allSourcePaths.Count > 1
+                                ? $"Sent (production) · {deletedCount}/{allSourcePaths.Count} files deleted"
+                                : "Sent (production) · file deleted")
+                            : "Sent (production)")
                         : "Sent (test, is_production=0)")
                     : $"HTTP {result.HttpStatusCode} {result.Status}: {result.Message}";
             }
 
             if (result.Ok)
             {
-                var dialogBody = payload.IsProduction == 1
-                    ? (deleted
-                        ? "UEX accepted the submission (PRODUCTION).\n\nThe source screenshot file has been deleted from disk per your preference. The submission record is kept in History."
-                        : "UEX accepted the submission (PRODUCTION).")
-                    : "UEX accepted the submission (TEST mode, is_production=0). Nothing committed live.";
+                string dialogBody;
+                if (payload.IsProduction == 1)
+                {
+                    if (deletedCount > 0)
+                    {
+                        dialogBody = allSourcePaths.Count > 1
+                            ? $"UEX accepted the submission (PRODUCTION).\n\n{deletedCount} of {allSourcePaths.Count} source screenshots have been deleted from disk per your preference. The submission record is kept in History."
+                            : "UEX accepted the submission (PRODUCTION).\n\nThe source screenshot file has been deleted from disk per your preference. The submission record is kept in History.";
+                    }
+                    else
+                    {
+                        dialogBody = "UEX accepted the submission (PRODUCTION).";
+                    }
+                }
+                else
+                {
+                    dialogBody = "UEX accepted the submission (TEST mode, is_production=0). Nothing committed live.";
+                }
                 _dialog.ShowInfo("Submission accepted", dialogBody);
             }
             else
@@ -516,4 +848,40 @@ public sealed partial class EditableRow : ObservableObject
     [ObservableProperty] private InventoryStatus _status = InventoryStatus.Unknown;
     [ObservableProperty] private double _matchScore;
     [ObservableProperty] private string _fromOcr = "";
+
+    /// <summary>True if SCU is missing/zero. Empty SCU + missing IsMissing flag = blocking error.</summary>
+    public bool ScuIsEmpty => ScuValue is null or <= 0;
+
+    /// <summary>True if Price is missing/zero. Empty price = blocking error.</summary>
+    public bool PriceIsEmpty => PriceValue is null or <= 0;
+
+    /// <summary>True if no commodity has been picked yet.</summary>
+    public bool CommodityIsMissing => Commodity is null;
+
+    /// <summary>
+    /// Severity bucket for the match score, returned as a string compatible with
+    /// the existing <c>SeverityToBrushConverter</c>:
+    ///   ≥ 95 → "Ok"     (green)
+    ///   80-94 → "Warning" (orange)
+    ///   &lt; 80  → "Error"   (red)
+    /// </summary>
+    /// <summary>
+    /// Severity for the match badge. Only a perfect 100 is "Ok" (green) —
+    /// because even 98% can be a wrong commodity (e.g. "Stims" → "Tins").
+    /// Anything &lt; 100 needs a visual cue to prompt user verification.
+    /// </summary>
+    public string MatchSeverity => MatchScore switch
+    {
+        >= 100 => "Ok",
+        >= 85 => "Warning",
+        _ => "Error",
+    };
+
+    // Force re-evaluation of the dependent computed properties whenever
+    // one of the backing fields changes. Without this, the cell coloring
+    // in the DataGrid would not refresh after the user edits a value.
+    partial void OnCommodityChanged(UexCommodity? value) => OnPropertyChanged(nameof(CommodityIsMissing));
+    partial void OnScuValueChanged(int? value) => OnPropertyChanged(nameof(ScuIsEmpty));
+    partial void OnPriceValueChanged(double? value) => OnPropertyChanged(nameof(PriceIsEmpty));
+    partial void OnMatchScoreChanged(double value) => OnPropertyChanged(nameof(MatchSeverity));
 }

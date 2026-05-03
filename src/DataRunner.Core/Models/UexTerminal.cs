@@ -29,4 +29,21 @@ public sealed class UexTerminal
             return parts.Length > 0 ? string.Join(" / ", parts!) : "";
         }
     }
+
+    /// <summary>
+    /// Compact label for UI: <c>"Display Name · Star System"</c>. Always includes
+    /// the star system so the user can disambiguate Pyro Gateway (Stanton) from
+    /// Pyro Gateway (Pyro), per UEX community feedback. Falls back gracefully
+    /// when StarSystemName is missing (legacy data).
+    /// </summary>
+    public string RichDisplayName
+    {
+        get
+        {
+            var name = !string.IsNullOrWhiteSpace(DisplayName) ? DisplayName : Name;
+            return string.IsNullOrWhiteSpace(StarSystemName)
+                ? name
+                : $"{name} · {StarSystemName}";
+        }
+    }
 }

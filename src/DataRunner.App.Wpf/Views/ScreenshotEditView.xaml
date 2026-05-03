@@ -25,65 +25,39 @@
         </ObjectDataProvider>
     </UserControl.Resources>
 
+    <!-- Three-row layout:
+           Row 0 (Auto)  : compact title bar
+           Row 1 (*)     : split body — scrollable form on the left, sticky preview on the right
+           Row 2 (Auto)  : sticky validation panel + send action bar (NEVER scrolled away)
+         The preview no longer hogs the top of the screen; it lives in a side column
+         the user can resize via the inner GridSplitter. -->
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="240" MinHeight="120" />
-            <RowDefinition Height="6" />
-            <RowDefinition Height="*" MinHeight="320" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- TOP: image preview (drag the splitter to resize, click to open viewer) -->
-        <Border Grid.Row="0"
-                Background="Black"
-                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                BorderThickness="0,0,0,1">
-            <Grid>
-                <Image x:Name="PreviewImageThumb"
-                       Source="{Binding PreviewImage}"
-                       Stretch="Uniform"
-                       Margin="8"
-                       Cursor="Hand"
-                       MouseLeftButtonUp="PreviewImage_MouseLeftButtonUp"
-                       ToolTip="Click to open in full-screen viewer (zoom + pan)" />
+        <!-- Row 0: compact title bar -->
+        <StackPanel Grid.Row="0" Margin="20,12,20,8">
+            <TextBlock Text="Validate before submission"
+                       FontSize="20" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0,2,0,0" FontSize="11"
+                       Text="Review every value before clicking Send. Submissions default to TEST mode (is_production=0)." />
+        </StackPanel>
 
-                <Border VerticalAlignment="Top" HorizontalAlignment="Left"
-                        Margin="16,12,0,0" Padding="8,4"
-                        Background="#88000000" CornerRadius="4"
-                        IsHitTestVisible="False">
-                    <TextBlock Text="{Binding SourceImagePath}"
-                               Foreground="White" FontSize="11" Opacity="0.85"
-                               TextTrimming="CharacterEllipsis" MaxWidth="520" />
-                </Border>
+        <!-- Row 1: split body — form left, preview right -->
+        <Grid Grid.Row="1" Margin="20,0,20,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="420" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="320" MinWidth="220" MaxWidth="600" />
+            </Grid.ColumnDefinitions>
 
-                <Border VerticalAlignment="Top" HorizontalAlignment="Right"
-                        Margin="0,12,16,0" Padding="8,4"
-                        Background="#88000000" CornerRadius="4"
-                        IsHitTestVisible="False">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="ZoomIn24" Foreground="White" FontSize="13" Margin="0,0,4,0" />
-                        <TextBlock Text="Click to zoom" Foreground="White" FontSize="11" Opacity="0.85" />
-                    </StackPanel>
-                </Border>
-            </Grid>
-        </Border>
-
-        <GridSplitter Grid.Row="1"
-                      Height="6"
-                      HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                      Background="Transparent"
-                      ShowsPreview="True"
-                      Cursor="SizeNS"
-                      ResizeBehavior="PreviousAndNext" />
-
-        <!-- BOTTOM: edit form (full width) -->
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="20,16,20,16">
-
-                <TextBlock Text="Validate before submission"
-                           FontSize="22" FontWeight="SemiBold"
-                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0,4,0,16"
-                           Text="The OCR pipeline produced a draft. Review every value, fix what's wrong, then send to UEX. Submissions are sent in TEST mode by default (is_production=0)." />
+            <!-- LEFT column: scrollable form (terminal card + commodities + metadata) -->
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
 
                 <!-- TERMINAL CARD -->
                 <ui:Card Margin="0,0,0,12" Padding="16">
@@ -106,6 +80,38 @@
                                        Text="{Binding TerminalMatchScore, StringFormat='match {0:F0}/100'}"
                                        FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
                         </DockPanel>
+
+                        <!-- Ambiguous-terminal warning banner. Visible only when the
+                             current terminal name exists in 2+ star systems AND the
+                             user has not explicitly confirmed a pick. -->
+                        <Border Margin="0,8,0,0" Padding="10,6"
+                                Background="#22C8504F" BorderBrush="#88C8504F"
+                                BorderThickness="1" CornerRadius="4">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding IsAmbiguousTerminal}" Value="True" />
+                                                <Condition Binding="{Binding UserExplicitlyConfirmedTerminal}" Value="False" />
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <DockPanel>
+                                <ui:SymbolIcon DockPanel.Dock="Left" Symbol="Warning24"
+                                               Margin="0,0,8,0" Foreground="IndianRed"
+                                               VerticalAlignment="Center" />
+                                <TextBlock TextWrapping="Wrap" FontSize="12">
+                                    <Run Text="Ambiguous terminal: this name exists in multiple star systems." FontWeight="SemiBold" />
+                                    <LineBreak />
+                                    <Run Text="Pick the correct one in the dropdown below — candidates are pinned at the top." />
+                                </TextBlock>
+                            </DockPanel>
+                        </Border>
 
                         <Grid Margin="0,8,0,0">
                             <ui:TextBox x:Name="TerminalSearchBox"
@@ -137,7 +143,9 @@
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <StackPanel>
-                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                                    <!-- Show "Display Name · Star System" so the user disambiguates
+                                                         multi-system terminals (Pyro Gateway, ARC-L1, etc.) at a glance. -->
+                                                    <TextBlock Text="{Binding RichDisplayName}" FontWeight="SemiBold" />
                                                     <TextBlock Text="{Binding LocationLabel}"
                                                                FontSize="11" Opacity="0.65"
                                                                TextTrimming="CharacterEllipsis" />
@@ -231,6 +239,19 @@
                                             <Setter Property="VerticalAlignment" Value="Center" />
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
+                                    <!-- Cell-level style to colour the entire cell background when SCU is missing.
+                                         Using CellStyle (vs ElementStyle) so the highlight covers the whole cell,
+                                         not just the text inside. -->
+                                    <DataGridTextColumn.CellStyle>
+                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ScuIsEmpty}" Value="True">
+                                                    <Setter Property="Background" Value="#33C8504F" />
+                                                    <Setter Property="ToolTip" Value="SCU is required (or set the in-game status to 'Out of stock')." />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGridTextColumn.CellStyle>
                                 </DataGridTextColumn>
 
                                 <DataGridTextColumn Header="Price (aUEC/SCU)" Width="130" MinWidth="100"
@@ -242,6 +263,16 @@
                                             <Setter Property="VerticalAlignment" Value="Center" />
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
+                                    <DataGridTextColumn.CellStyle>
+                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding PriceIsEmpty}" Value="True">
+                                                    <Setter Property="Background" Value="#33C8504F" />
+                                                    <Setter Property="ToolTip" Value="Price is required for this row." />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGridTextColumn.CellStyle>
                                 </DataGridTextColumn>
 
                                 <DataGridTemplateColumn Header="Status" Width="*" MinWidth="120">
@@ -254,19 +285,27 @@
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
 
-                                <DataGridTextColumn Header="Match" Width="56" MinWidth="48"
-                                                    Binding="{Binding MatchScore, StringFormat=F0}"
-                                                    IsReadOnly="True">
-                                    <DataGridTextColumn.ElementStyle>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="HorizontalAlignment" Value="Right" />
-                                            <Setter Property="Margin" Value="0,0,4,0" />
-                                            <Setter Property="VerticalAlignment" Value="Center" />
-                                            <Setter Property="Opacity" Value="0.7" />
-                                            <Setter Property="FontSize" Value="11" />
-                                        </Style>
-                                    </DataGridTextColumn.ElementStyle>
-                                </DataGridTextColumn>
+                                <!-- Match score: rendered as a small coloured pill (green ≥95, orange 80-94, red <80)
+                                     instead of plain text, so the user sees at a glance which OCR results are
+                                     trustworthy. Foreground brush comes from MatchSeverity ("Ok"/"Warning"/"Error")
+                                     piped through the existing SeverityToBrushConverter. -->
+                                <DataGridTemplateColumn Header="Match" Width="64" MinWidth="56" SortMemberPath="MatchScore">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <Border CornerRadius="3" Padding="6,2"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    Margin="0,0,4,0"
+                                                    Background="{Binding MatchSeverity, Converter={StaticResource SeverityToBrush}}"
+                                                    Opacity="0.85">
+                                                <TextBlock Text="{Binding MatchScore, StringFormat=F0}"
+                                                           Foreground="White"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold" />
+                                            </Border>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
 
                                 <DataGridTemplateColumn Width="36">
                                     <DataGridTemplateColumn.CellTemplate>
@@ -303,29 +342,136 @@
                     </StackPanel>
                 </ui:CardExpander>
 
-                <!-- ACTION BAR -->
-                <Border Margin="0,8,0,0" Padding="0,12,0,0"
-                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="0,1,0,0">
-                    <DockPanel>
-                        <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center"
-                                  IsChecked="{Binding IsProduction}"
-                                  Content="is_production = 1 (commit live to UEX)"
-                                  Foreground="IndianRed" />
-                        <ui:Button DockPanel.Dock="Right"
-                                   HorizontalAlignment="Right"
-                                   Appearance="Primary"
-                                   Padding="22,10"
-                                   Command="{Binding SubmitCommand}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Send to UEX" FontWeight="SemiBold" />
-                                <ui:SymbolIcon Symbol="ArrowUpload24" Margin="8,0,0,0" />
-                            </StackPanel>
-                        </ui:Button>
-                    </DockPanel>
-                </Border>
+                </StackPanel>
+            </ScrollViewer>
 
+            <!-- Vertical splitter between form and preview. -->
+            <GridSplitter Grid.Column="1"
+                          Width="6"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                          Background="Transparent"
+                          ShowsPreview="False"
+                          Cursor="SizeWE"
+                          ResizeBehavior="PreviousAndNext" />
+
+            <!-- RIGHT column: sticky preview. Click → opens full-screen viewer. -->
+            <Border Grid.Column="2"
+                    Background="Black"
+                    CornerRadius="6"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1">
+                <Grid>
+                    <Image x:Name="PreviewImageThumb"
+                           Source="{Binding PreviewImage}"
+                           Stretch="Uniform"
+                           Margin="6"
+                           Cursor="Hand"
+                           MouseLeftButtonUp="PreviewImage_MouseLeftButtonUp"
+                           ToolTip="Click to open in full-screen viewer (zoom + pan)" />
+
+                    <Border VerticalAlignment="Top" HorizontalAlignment="Left"
+                            Margin="10,8,0,0" Padding="6,3"
+                            Background="#88000000" CornerRadius="3"
+                            IsHitTestVisible="False">
+                        <TextBlock Text="{Binding SourceImagePath}"
+                                   Foreground="White" FontSize="10" Opacity="0.85"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="280" />
+                    </Border>
+
+                    <Border VerticalAlignment="Top" HorizontalAlignment="Right"
+                            Margin="0,8,10,0" Padding="6,3"
+                            Background="#88000000" CornerRadius="3"
+                            IsHitTestVisible="False">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="ZoomIn24" Foreground="White" FontSize="11" Margin="0,0,3,0" />
+                            <TextBlock Text="Click to zoom" Foreground="White" FontSize="10" Opacity="0.85" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Row 2: STICKY validation panel + send action bar. Lives outside any
+             ScrollViewer so the user can NEVER scroll past it and forget there
+             was an error blocking submission. -->
+        <Border Grid.Row="2" Padding="20,8,20,12"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                BorderThickness="0,1,0,0">
+            <StackPanel>
+                <!-- Validation card — tinted by OverallSeverity. -->
+                <ui:Card Margin="0,0,0,8" Padding="12,10">
+                    <ui:Card.Style>
+                        <Style TargetType="ui:Card">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding OverallSeverity}" Value="Error">
+                                    <Setter Property="Background" Value="#22C8504F" />
+                                    <Setter Property="BorderBrush" Value="#88C8504F" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding OverallSeverity}" Value="Warning">
+                                    <Setter Property="Background" Value="#22DAA520" />
+                                    <Setter Property="BorderBrush" Value="#88DAA520" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ui:Card.Style>
+                    <StackPanel>
+                        <DockPanel>
+                            <ui:SymbolIcon DockPanel.Dock="Left"
+                                           Symbol="Warning24"
+                                           Margin="0,0,8,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{Binding OverallSeverity, Converter={StaticResource SeverityToBrush}}" />
+                            <TextBlock Text="{Binding ValidationSummary}"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                        </DockPanel>
+                        <ItemsControl ItemsSource="{Binding ValidationIssues}" Margin="0,6,0,0"
+                                      MaxHeight="100">
+                            <ItemsControl.Template>
+                                <ControlTemplate TargetType="ItemsControl">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                        <ItemsPresenter />
+                                    </ScrollViewer>
+                                </ControlTemplate>
+                            </ItemsControl.Template>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <DockPanel Margin="0,1">
+                                        <Ellipse DockPanel.Dock="Left"
+                                                 Width="7" Height="7"
+                                                 Margin="0,0,8,0"
+                                                 VerticalAlignment="Center"
+                                                 Fill="{Binding Severity, Converter={StaticResource SeverityToBrush}}" />
+                                        <TextBlock Text="{Binding Message}"
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Opacity="0.9" />
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ui:Card>
+
+                <DockPanel>
+                    <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center"
+                              IsChecked="{Binding IsProduction}"
+                              Content="is_production = 1 (commit live to UEX)"
+                              Foreground="IndianRed" />
+                    <ui:Button DockPanel.Dock="Right"
+                               HorizontalAlignment="Right"
+                               Appearance="Primary"
+                               Padding="22,10"
+                               Command="{Binding SubmitCommand}"
+                               ToolTip="{Binding ValidationSummary}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Send to UEX" FontWeight="SemiBold" />
+                            <ui:SymbolIcon Symbol="ArrowUpload24" Margin="8,0,0,0" />
+                        </StackPanel>
+                    </ui:Button>
+                </DockPanel>
             </StackPanel>
-        </ScrollViewer>
+        </Border>
     </Grid>
 </UserControl>

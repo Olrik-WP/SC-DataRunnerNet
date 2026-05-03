@@ -66,6 +66,7 @@ public sealed partial class OcrCoordinator : ObservableObject
             Status = InboxStatus.Processing,
             StatusReason = "Waiting for OCR…",
             AddedAt = DateTimeOffset.Now,
+            SourcePaths = new() { imagePath },
         };
         InvokeOnUi(() => _inbox.Items.Add(item));
         _ = ProcessAsync(item);
@@ -118,7 +119,14 @@ public sealed partial class OcrCoordinator : ObservableObject
             {
                 item.Submission = result.Submission;
                 item.Payload = result.Payload;
-                item.TerminalLabel = result.Submission.TerminalDisplayName ?? "(terminal not detected)";
+                // Show "Display Name · Star System" so the user can disambiguate
+                // multi-system terminals (Pyro Gateway, ARC-L1, etc.) at a glance
+                // even from the inbox card before opening the editor.
+                item.TerminalLabel = result.Submission.IdTerminal is { } tid
+                    ? (App.Resolve<DataRunner.Core.Abstractions.ICatalogProvider>().GetTerminal(tid)?.RichDisplayName
+                       ?? result.Submission.TerminalDisplayName
+                       ?? "(terminal not detected)")
+                    : "(terminal not detected)";
                 item.RowCount = result.Submission.Prices.Count;
                 item.Status = result.Submission.NeedsReview.Count == 0 && result.Submission.IdTerminal is not null
                     ? InboxStatus.Ready

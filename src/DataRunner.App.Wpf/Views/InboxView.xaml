@@ -13,8 +13,9 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="320" />
-            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="320" MinWidth="240" MaxWidth="500" />
+            <ColumnDefinition Width="4" />
+            <ColumnDefinition Width="*" MinWidth="400" />
         </Grid.ColumnDefinitions>
 
         <!-- LEFT: list of pending screenshots -->
@@ -117,30 +118,97 @@
                          SelectionMode="Extended"
                          Background="Transparent"
                          BorderThickness="0"
+                         HorizontalContentAlignment="Stretch"
                          Padding="8">
+                    <ListBox.ItemContainerStyle>
+                        <!-- Reset the default ListBoxItem chrome so OUR card is the one
+                             that controls background. We add a 2px accent bar on the LEFT
+                             via the IsSelected trigger — clean, immune to status colour. -->
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="0" />
+                            <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <Border Background="{TemplateBinding Background}">
+                                            <ContentPresenter />
+                                        </Border>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Border Margin="0,3" Padding="12,10"
-                                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                                    CornerRadius="6">
+                            <!-- Card root: tinted by status (Pending/Ready/Review/Sent/Failed)
+                                 via InboxStatusToBrush. Selection is shown by an accent border,
+                                 NOT by repurposing the status colour, so the user always sees
+                                 BOTH "what state am I in" and "what did I click on". -->
+                            <Border Margin="2,3" Padding="10,8"
+                                    CornerRadius="6"
+                                    BorderThickness="2"
+                                    Background="{Binding Status, Converter={StaticResource InboxStatusToBrush}}">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="BorderBrush" Value="Transparent" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=IsSelected}" Value="True">
+                                                <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
+
+                                    <!-- Status dot + thumbnail. Click on the thumbnail opens
+                                         the full-screen ImageViewer for a careful inspection. -->
+                                    <StackPanel Grid.Column="0" Margin="0,0,10,0" VerticalAlignment="Top">
+                                        <Ellipse Width="9" Height="9" Margin="0,2,0,6"
+                                                 HorizontalAlignment="Left"
+                                                 Fill="{Binding Status, Converter={StaticResource InboxStatusToDot}}" />
+                                        <Border Width="96" Height="54" CornerRadius="3" ClipToBounds="True"
+                                                Background="#222"
+                                                Cursor="Hand"
+                                                MouseLeftButtonUp="Thumbnail_MouseLeftButtonUp"
+                                                ToolTip="Click to open the full-size screenshot">
+                                            <Image Source="{Binding Thumbnail}"
+                                                   Stretch="UniformToFill" />
+                                        </Border>
+                                    </StackPanel>
+
+                                    <!-- Text block: name, terminal · system, count + age. -->
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Top">
                                         <TextBlock Text="{Binding DisplayName}"
                                                    FontWeight="SemiBold"
                                                    TextTrimming="CharacterEllipsis" />
                                         <TextBlock Text="{Binding TerminalLabel}"
-                                                   FontSize="11" Opacity="0.7"
-                                                   TextTrimming="CharacterEllipsis" />
-                                        <TextBlock FontSize="10" Opacity="0.5"
-                                                   Text="{Binding AddedAt, StringFormat='added {0:HH:mm:ss}'}" />
+                                                   FontSize="11" Opacity="0.8"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Margin="0,2,0,0" />
+                                        <TextBlock FontSize="10" Opacity="0.6" Margin="0,4,0,0">
+                                            <Run Text="{Binding RowCount, Mode=OneWay}" />
+                                            <Run Text=" rows · added " />
+                                            <Run Text="{Binding AddedAt, StringFormat='HH:mm:ss', Mode=OneWay}" />
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding StatusReason}"
+                                                   FontSize="10" Opacity="0.55"
+                                                   Margin="0,2,0,0"
+                                                   TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <Border Grid.Column="1" CornerRadius="3" Padding="6,2"
+
+                                    <!-- Status badge stays as a textual hint; redundant with
+                                         the dot but useful for screen-readers / accessibility. -->
+                                    <Border Grid.Column="2" CornerRadius="3" Padding="6,2"
                                             VerticalAlignment="Top"
-                                            Background="{DynamicResource AccentFillColorTertiaryBrush}">
+                                            Background="#33000000">
                                         <TextBlock Text="{Binding Status}" FontSize="10" />
                                     </Border>
                                 </Grid>
@@ -151,11 +219,21 @@
             </DockPanel>
         </Border>
 
+        <!-- SPLITTER between inbox and editor. ResizeBehavior=PreviousAndNext lets
+             the user drag freely between the column min/max widths declared above. -->
+        <GridSplitter Grid.Column="1"
+                      Width="4"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      Background="Transparent"
+                      ShowsPreview="False"
+                      ResizeBehavior="PreviousAndNext" />
+
         <!-- RIGHT: editor.
              We anchor the editor binding via RelativeSource so that the Visibility
              check looks at InboxViewModel.CurrentEditor regardless of any
              DataContext re-targeting that happens inside the ContentControl. -->
-        <Grid Grid.Column="1" x:Name="EditorPanel">
+        <Grid Grid.Column="2" x:Name="EditorPanel">
 
             <!-- The editor itself. Wrapped in a Border whose visibility is bound
                  to the parent Grid's DataContext (the InboxViewModel) so we are

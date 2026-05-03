@@ -119,3 +119,68 @@ public sealed class SeverityToBrushConverter : IValueConverter
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => throw new NotSupportedException();
 }
+
+/// <summary>
+/// Maps an <see cref="ViewModels.InboxStatus"/> to a tinted background brush
+/// for the inbox card. Tints are intentionally subtle (15-20% opacity) so the
+/// status colour does NOT clash with the WPF-UI selection highlight — the
+/// selection accent always stays clearly visible on top.
+///
+///   Pending    → muted gray
+///   Processing → soft blue (work in progress)
+///   Ready      → muted green (clean, ready to send)
+///   Review     → muted amber (needs user attention)
+///   Sent       → solid green tint + left bar (terminal state)
+///   Failed     → muted red
+/// </summary>
+public sealed class InboxStatusToBrushConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var status = value?.ToString() ?? "";
+        return status switch
+        {
+            "Processing" => Brush("#222F8FCB"),  // soft blue
+            "Ready"      => Brush("#2532A852"),  // muted green
+            "Review"     => Brush("#28DAA520"),  // muted amber
+            "Sent"       => Brush("#3532A852"),  // stronger green
+            "Failed"     => Brush("#33C8504F"),  // muted red
+            _            => Brush("#1AFFFFFF"),  // gray fallback (Pending)
+        };
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+
+    private static System.Windows.Media.SolidColorBrush Brush(string hex)
+    {
+        var b = new System.Windows.Media.SolidColorBrush(
+            (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex));
+        b.Freeze();
+        return b;
+    }
+}
+
+/// <summary>
+/// Status → solid colour for the small status dot on each inbox card.
+/// Brighter than the background tint so the dot is unmistakable at a glance.
+/// </summary>
+public sealed class InboxStatusToDotBrushConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var status = value?.ToString() ?? "";
+        return status switch
+        {
+            "Processing" => System.Windows.Media.Brushes.SteelBlue,
+            "Ready"      => System.Windows.Media.Brushes.MediumSeaGreen,
+            "Review"     => System.Windows.Media.Brushes.Goldenrod,
+            "Sent"       => System.Windows.Media.Brushes.MediumSeaGreen,
+            "Failed"     => System.Windows.Media.Brushes.IndianRed,
+            _            => System.Windows.Media.Brushes.Gray,
+        };
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}

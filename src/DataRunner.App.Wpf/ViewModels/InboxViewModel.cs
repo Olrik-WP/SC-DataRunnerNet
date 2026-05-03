@@ -116,6 +116,7 @@ public sealed partial class InboxViewModel : ObservableObject
                     DisplayName = Path.GetFileName(path),
                     Status = InboxStatus.Pending,
                     AddedAt = DateTimeOffset.Now,
+                    SourcePaths = new() { path },
                 });
             }
         }
@@ -251,16 +252,27 @@ public sealed partial class InboxViewModel : ObservableObject
             Notes = $"Merged from {sources.Count} screenshots ({string.Join(", ", sources.Select(s => Path.GetFileName(s.ImagePath)))})",
         };
 
+        // Resolve the rich label (Name · System) for the merged item so the inbox
+        // card shows the disambiguated terminal, not just the bare name.
+        var mergedTerminal = first.Submission.IdTerminal is { } tid
+            ? App.Resolve<DataRunner.Core.Abstractions.ICatalogProvider>().GetTerminal(tid)
+            : null;
+        var mergedRichLabel = mergedTerminal?.RichDisplayName ?? first.Submission.TerminalDisplayName;
+
         var mergedItem = new InboxItem
         {
             ImagePath = first.ImagePath, // Primary screenshot for preview / attachment
-            DisplayName = $"[Merged x{sources.Count}] {first.Submission.TerminalDisplayName}",
+            DisplayName = $"[Merged x{sources.Count}] {mergedRichLabel}",
             Status = InboxStatus.Review,
             StatusReason = $"Merged {mergedRows.Count} commodities from {sources.Count} screenshots",
             AddedAt = DateTimeOffset.Now,
-            TerminalLabel = first.Submission.TerminalDisplayName,
+            TerminalLabel = mergedRichLabel,
             RowCount = mergedRows.Count,
             Submission = mergedSubmission,
+            // Track ALL sources so the post-send cleanup can delete every file
+            // and the rescan filter can skip every basename. Without this the
+            // 2 stragglers from the merge would be re-OCRed at the next scan.
+            SourcePaths = sources.Select(s => s.ImagePath).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
         };
 
         Items.Add(mergedItem);
@@ -279,8 +291,62 @@ public sealed partial class InboxItem : ObservableObject
     [ObservableProperty] private int _rowCount;
     [ObservableProperty] private string? _statusReason;
 
+    private System.Windows.Media.Imaging.BitmapImage? _thumbnail;
+
+    /// <summary>
+    /// Lazy-loaded 96px-wide thumbnail used in the inbox card. Built on demand
+    /// from <see cref="ImagePath"/> the FIRST time it's accessed (typically when
+    /// the card binds to it), then cached in memory until the item is removed.
+    /// We use <see cref="System.Windows.Media.Imaging.BitmapCacheOption.OnLoad"/>
+    /// + <c>DecodePixelWidth = 96</c> so the file handle is released immediately
+    /// and memory stays under ~30 KB per thumbnail.
+    /// </summary>
+    public System.Windows.Media.Imaging.BitmapImage? Thumbnail
+    {
+        get
+        {
+            if (_thumbnail is not null) return _thumbnail;
+            if (string.IsNullOrWhiteSpace(ImagePath) || !System.IO.File.Exists(ImagePath))
+                return null;
+            try
+            {
+                var bmp = new System.Windows.Media.Imaging.BitmapImage();
+                bmp.BeginInit();
+                bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                bmp.DecodePixelWidth = 96;
+                bmp.UriSource = new Uri(ImagePath);
+                bmp.EndInit();
+                bmp.Freeze();
+                _thumbnail = bmp;
+                return _thumbnail;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
     public ParsedSubmission? Submission { get; set; }
     public UexDataSubmitPayload? Payload { get; set; }
+
+    /// <summary>
+    /// Full file paths of EVERY screenshot represented by this item. For a regular
+    /// single-shot import this is just <c>[ImagePath]</c>. For a merged item it
+    /// holds all the source paths so the watcher can skip them at rescan and the
+    /// post-send cleanup can delete them all.
+    ///
+    /// Always non-null. The first entry is conventionally the "primary" (preview
+    /// shown in the editor / sent to UEX in the `screenshot` field).
+    /// </summary>
+    public List<string> SourcePaths { get; set; } = new();
+
+    /// <summary>Convenience: just the file names (basenames) of <see cref="SourcePaths"/>.</summary>
+    public List<string> SourceFileNames => SourcePaths
+        .Select(System.IO.Path.GetFileName)
+        .Where(n => !string.IsNullOrWhiteSpace(n))
+        .Select(n => n!)
+        .ToList();
 }
 
 public enum InboxStatus

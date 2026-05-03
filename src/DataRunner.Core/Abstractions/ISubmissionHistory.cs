@@ -41,7 +41,24 @@ public sealed class SubmissionRecord
     public int HttpStatusCode { get; set; }
     public string? ApiStatus { get; set; }
     public string? ApiMessage { get; set; }
+
+    /// <summary>
+    /// Filename of the PRIMARY screenshot — the one actually attached to the
+    /// `screenshot` field of the UEX payload (UEX accepts only one image per
+    /// submission). Kept for backward compatibility with rows pre-dating the
+    /// merge feature; new rows also populate <see cref="SourceImages"/>.
+    /// </summary>
     public string? SourceImage { get; set; }
+
+    /// <summary>
+    /// All screenshot filenames represented by this submission (≥ 1). For a
+    /// regular single-shot submission this is just <c>[SourceImage]</c>. For a
+    /// merged submission it is the full list of source files so that:
+    ///   - the post-send delete-after-submit can wipe every file from disk
+    ///   - the watcher rescan can skip every file (not just the primary)
+    /// </summary>
+    public List<string> SourceImages { get; set; } = new();
+
     public string RequestJson { get; set; } = "";
     public string ResponseJson { get; set; } = "";
     public List<int> SubmittedCommodityIds { get; set; } = new();
