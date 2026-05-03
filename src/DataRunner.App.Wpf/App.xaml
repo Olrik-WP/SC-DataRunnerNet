@@ -1,0 +1,24 @@
+<Application x:Class="DataRunner.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:conv="clr-namespace:DataRunner.App.Converters"
+             ShutdownMode="OnMainWindowClose">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Dark" />
+                <ui:ControlsDictionary />
+            </ResourceDictionary.MergedDictionaries>
+
+            <conv:NavTagToVisibilityConverter x:Key="NavTagToVisibility" />
+            <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+            <conv:IntEqualsToVisibilityConverter x:Key="IntEqualsToVisibility" />
+            <conv:SeverityToBrushConverter x:Key="SeverityToBrush" />
+            <conv:OcrStatusToBrushConverter x:Key="OcrStatusToBrush" />
+            <conv:SmartNumberConverter x:Key="SmartNumber" />
+            <conv:RelativeTimeConverter x:Key="RelativeTime" />
+            <conv:DaysStaleToBrushConverter x:Key="DaysStaleToBrush" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

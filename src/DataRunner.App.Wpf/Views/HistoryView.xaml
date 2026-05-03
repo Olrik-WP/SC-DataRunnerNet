@@ -1,0 +1,64 @@
+<UserControl x:Class="DataRunner.App.Views.HistoryView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:DataRunner.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             d:DataContext="{d:DesignInstance Type=vm:HistoryViewModel}"
+             mc:Ignorable="d">
+
+    <Grid Margin="32,24,32,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,16">
+            <StackPanel>
+                <TextBlock Text="Submission history"
+                           FontSize="28" FontWeight="SemiBold" />
+                <TextBlock Text="Every UEX POST attempt (success or failure) is recorded locally in SQLite."
+                           Opacity="0.7" Margin="0,4,0,0" />
+            </StackPanel>
+            <ui:Button DockPanel.Dock="Right" HorizontalAlignment="Right"
+                       Appearance="Secondary"
+                       Command="{Binding RefreshCommand}"
+                       Padding="14,7">
+                <StackPanel Orientation="Horizontal">
+                    <ui:SymbolIcon Symbol="ArrowSync24" Margin="0,0,6,0" />
+                    <TextBlock Text="Refresh" />
+                </StackPanel>
+            </ui:Button>
+        </DockPanel>
+
+        <DataGrid Grid.Row="1"
+                  ItemsSource="{Binding Items}"
+                  SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                  AutoGenerateColumns="False"
+                  GridLinesVisibility="None"
+                  HeadersVisibility="Column"
+                  CanUserAddRows="False"
+                  IsReadOnly="True"
+                  Background="Transparent">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="When" Width="160"
+                                    Binding="{Binding At, StringFormat='yyyy-MM-dd HH:mm:ss'}" />
+                <DataGridTextColumn Header="Terminal" Width="240"
+                                    Binding="{Binding TerminalDisplayName}" />
+                <DataGridTextColumn Header="Source" Width="200"
+                                    Binding="{Binding SourceImage}" />
+                <DataGridTextColumn Header="Prod" Width="50"
+                                    Binding="{Binding IsProduction}" />
+                <DataGridTextColumn Header="OK" Width="50"
+                                    Binding="{Binding Ok}" />
+                <DataGridTextColumn Header="HTTP" Width="60"
+                                    Binding="{Binding HttpStatusCode}" />
+                <DataGridTextColumn Header="API status" Width="100"
+                                    Binding="{Binding ApiStatus}" />
+                <DataGridTextColumn Header="Message" Width="*"
+                                    Binding="{Binding ApiMessage}" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

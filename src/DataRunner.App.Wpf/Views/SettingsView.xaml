@@ -1,0 +1,264 @@
+<UserControl x:Class="DataRunner.App.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:DataRunner.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
+             mc:Ignorable="d">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="32,24,32,32" MaxWidth="780" HorizontalAlignment="Left">
+
+            <TextBlock Text="Settings"
+                       FontSize="28" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            <TextBlock Text="Configure your UEX credentials, screenshot folder, and app preferences."
+                       Opacity="0.7" Margin="0,4,0,24" />
+
+            <!-- UEX SECRET KEY -->
+            <ui:Card Padding="22,18" Margin="0,0,0,16">
+                <StackPanel>
+                    <DockPanel>
+                        <ui:SymbolIcon Symbol="Key24" />
+                        <TextBlock Text="UEX secret-key"
+                                   FontSize="16" FontWeight="SemiBold"
+                                   Margin="10,0,0,0" VerticalAlignment="Center" />
+
+                        <!-- KEY STATUS BADGE -->
+                        <Border DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                CornerRadius="10" Padding="10,3"
+                                Visibility="{Binding HasSecretKey, Converter={StaticResource BoolToVisibility}}"
+                                Background="#1FA34A">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="CheckmarkCircle16" FontSize="13"
+                                               Foreground="White" />
+                                <TextBlock Text="Saved on this PC" FontSize="11"
+                                           Foreground="White" Margin="6,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                        <Border DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                CornerRadius="10" Padding="10,3"
+                                Visibility="{Binding HasSecretKey, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}"
+                                Background="#C0392B">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Warning16" FontSize="13"
+                                               Foreground="White" />
+                                <TextBlock Text="Not configured" FontSize="11"
+                                           Foreground="White" Margin="6,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                    </DockPanel>
+                    <TextBlock TextWrapping="Wrap" Margin="0,8,0,4" Opacity="0.75"
+                               Text="Identifies YOU (the datarunner) on every /data_submit POST. Encrypted at rest using Windows DPAPI; never leaves this machine." />
+                    <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" Opacity="0.6" FontSize="11"
+                               Text="Found on uexcorp.space → Account → 'Secret Key' section. This is the user-side credential — it's used together with the App bearer token below." />
+
+                    <ui:HyperlinkButton Content="Open UEX Account page (Secret Key section)"
+                                        Command="{Binding OpenUexAccountPageCommand}" />
+
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:PasswordBox Grid.Column="0"
+                                        Password="{Binding SecretKeyInput, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}"
+                                        PlaceholderText="{Binding KeyInputPlaceholder}" />
+                        <ui:Button Grid.Column="1" Margin="8,0,0,0" Padding="14,7"
+                                   Appearance="Primary"
+                                   Command="{Binding SaveSecretKeyCommand}"
+                                   Content="Save key" />
+                        <ui:Button Grid.Column="2" Margin="8,0,0,0" Padding="14,7"
+                                   Appearance="Caution"
+                                   Command="{Binding ClearSecretKeyCommand}"
+                                   Content="Clear" />
+                    </Grid>
+
+                    <!-- Reassurance line shown only AFTER a key has been saved.
+                         Empty PasswordBox is intentional: we never re-display the key in clear text. -->
+                    <Border Margin="0,10,0,0" Padding="10,7" CornerRadius="4"
+                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                            Visibility="{Binding HasSecretKey, Converter={StaticResource BoolToVisibility}}">
+                        <DockPanel>
+                            <ui:SymbolIcon Symbol="Shield24" Margin="0,0,8,0" Opacity="0.75" />
+                            <TextBlock TextWrapping="Wrap" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       Text="Your key is encrypted and saved. The field above stays empty for security — paste a new key only if you want to replace it. Click 'Clear' to forget it." />
+                        </DockPanel>
+                    </Border>
+                </StackPanel>
+            </ui:Card>
+
+            <!-- UEX APP BEARER TOKEN -->
+            <ui:Card Padding="22,18" Margin="0,0,0,16">
+                <StackPanel>
+                    <DockPanel>
+                        <ui:SymbolIcon Symbol="AppFolder24" />
+                        <TextBlock Text="UEX app bearer token"
+                                   FontSize="16" FontWeight="SemiBold"
+                                   Margin="10,0,0,0" VerticalAlignment="Center" />
+
+                        <Border DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                CornerRadius="10" Padding="10,3"
+                                Visibility="{Binding HasBearerToken, Converter={StaticResource BoolToVisibility}}"
+                                Background="#1FA34A">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="CheckmarkCircle16" FontSize="13" Foreground="White" />
+                                <TextBlock Text="Saved on this PC" FontSize="11"
+                                           Foreground="White" Margin="6,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                        <Border DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                CornerRadius="10" Padding="10,3"
+                                Visibility="{Binding HasBearerToken, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}"
+                                Background="#C0392B">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Warning16" FontSize="13" Foreground="White" />
+                                <TextBlock Text="Not configured" FontSize="11"
+                                           Foreground="White" Margin="6,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                    </DockPanel>
+
+                    <TextBlock TextWrapping="Wrap" Margin="0,8,0,4" Opacity="0.75"
+                               Text="Identifies the APPLICATION on every /data_submit POST (sent as 'Authorization: Bearer ...'). UEX requires BOTH this token AND your user secret-key — without it you'll get HTTP 403 / not_allowed." />
+                    <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" Opacity="0.6" FontSize="11"
+                               Text="Get it from uexcorp.space/api/apps: create a new app (e.g. 'SC DataRunner Net') and copy the generated token." />
+
+                    <ui:HyperlinkButton Content="Open UEX 'My Apps' page (create app + copy token)"
+                                        Command="{Binding OpenUexAppsPageCommand}" />
+
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:PasswordBox Grid.Column="0"
+                                        Password="{Binding BearerTokenInput, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}"
+                                        PlaceholderText="{Binding BearerInputPlaceholder}" />
+                        <ui:Button Grid.Column="1" Margin="8,0,0,0" Padding="14,7"
+                                   Appearance="Primary"
+                                   Command="{Binding SaveBearerTokenCommand}"
+                                   Content="Save token" />
+                        <ui:Button Grid.Column="2" Margin="8,0,0,0" Padding="14,7"
+                                   Appearance="Caution"
+                                   Command="{Binding ClearBearerTokenCommand}"
+                                   Content="Clear" />
+                    </Grid>
+
+                    <Border Margin="0,10,0,0" Padding="10,7" CornerRadius="4"
+                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                            Visibility="{Binding HasBearerToken, Converter={StaticResource BoolToVisibility}}">
+                        <DockPanel>
+                            <ui:SymbolIcon Symbol="Shield24" Margin="0,0,8,0" Opacity="0.75" />
+                            <TextBlock TextWrapping="Wrap" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       Text="Your app token is encrypted and saved. Same security model as the secret-key above: empty field is intentional, paste a new one to replace, 'Clear' to forget." />
+                        </DockPanel>
+                    </Border>
+                </StackPanel>
+            </ui:Card>
+
+            <!-- CATALOG -->
+            <ui:Card Padding="22,18" Margin="0,0,0,16">
+                <StackPanel>
+                    <DockPanel>
+                        <ui:SymbolIcon Symbol="DatabaseStack16" />
+                        <TextBlock Text="UEX catalog"
+                                   FontSize="16" FontWeight="SemiBold"
+                                   Margin="10,0,0,0" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Margin="0,8,0,12" Opacity="0.75"
+                               Text="{Binding CatalogStatus}" />
+                    <ui:Button Appearance="Secondary" HorizontalAlignment="Left"
+                               Padding="14,7"
+                               Command="{Binding RefreshCatalogCommand}">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="ArrowSync24" Margin="0,0,6,0" />
+                            <TextBlock Text="Refresh from UEX now" />
+                        </StackPanel>
+                    </ui:Button>
+                </StackPanel>
+            </ui:Card>
+
+            <!-- SUBMISSION OPTIONS -->
+            <ui:Card Padding="22,18" Margin="0,0,0,16">
+                <StackPanel>
+                    <DockPanel>
+                        <ui:SymbolIcon Symbol="ArrowUpload24" />
+                        <TextBlock Text="Submission options"
+                                   FontSize="16" FontWeight="SemiBold"
+                                   Margin="10,0,0,0" VerticalAlignment="Center" />
+                    </DockPanel>
+
+                    <CheckBox Margin="0,12,0,4"
+                              IsChecked="{Binding AttachScreenshotOnSubmit, Mode=TwoWay}"
+                              Content="Attach screenshot on submit (base64 in JSON payload)" />
+                    <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="11" Margin="22,0,0,0"
+                               Text="REQUIRED for new datarunners (UEX enforces a 90-day evaluation period during which submissions without a screenshot are rejected with HTTP 403 / not_allowed). Once you're past your evaluation, you may turn this off for privacy." />
+
+                    <CheckBox Margin="0,12,0,4"
+                              IsChecked="{Binding DeleteScreenshotAfterSubmit, Mode=TwoWay}"
+                              Content="Delete screenshot file after successful submission" />
+                    <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="11" Margin="22,0,0,0"
+                               Text="When enabled, the .png file is removed from the watched folder once the submission is accepted by UEX. The submission itself (terminal, prices, screenshot name, request/response) is always kept in the local History (SQLite) for audit. Failed and test (is_production=0) submissions never delete the file." />
+                </StackPanel>
+            </ui:Card>
+
+            <!-- SCREENSHOTS FOLDER -->
+            <ui:Card Padding="22,18" Margin="0,0,0,16">
+                <StackPanel>
+                    <DockPanel>
+                        <ui:SymbolIcon Symbol="Folder24" />
+                        <TextBlock Text="Screenshots folder"
+                                   FontSize="16" FontWeight="SemiBold"
+                                   Margin="10,0,0,0" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Margin="0,8,0,8" Opacity="0.75"
+                               Text="When set, the app will watch this folder and auto-import new screenshots into the inbox." />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBox Grid.Column="0"
+                                    Text="{Binding ScreenshotsFolder, UpdateSourceTrigger=PropertyChanged}"
+                                    PlaceholderText="e.g. D:\Jeux\StarCitizen\LIVE\Screenshots" />
+                        <ui:Button Grid.Column="1" Margin="8,0,0,0"
+                                   Padding="14,7"
+                                   Command="{Binding BrowseScreenshotsFolderCommand}"
+                                   ToolTip="Pick the folder Star Citizen writes F12 screenshots to.">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="FolderArrowRight24" Margin="0,0,6,0" />
+                                <TextBlock Text="Browse..." />
+                            </StackPanel>
+                        </ui:Button>
+                    </Grid>
+                    <TextBlock Margin="0,8,0,0" FontSize="11"
+                               Text="{Binding ScreenshotsFolderStatus}"
+                               Foreground="{Binding ScreenshotsFolderSeverity, Converter={StaticResource SeverityToBrush}}" />
+                </StackPanel>
+            </ui:Card>
+
+            <!-- ABOUT / PRIVACY -->
+            <ui:Card Padding="22,18" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="Privacy &amp; data" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" Opacity="0.75">
+                        OCR runs entirely on your computer.
+                        Only the data you explicitly Send (commodity rows + terminal id) is uploaded to UEX,
+                        and only after you click Send. Whether the source screenshot is attached
+                        is controlled by the toggle in 'Submission options' above.
+                    </TextBlock>
+                </StackPanel>
+            </ui:Card>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

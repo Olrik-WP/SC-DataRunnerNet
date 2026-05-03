@@ -1,0 +1,1 @@
+.\src\DataRunner.App.Wpf\bin\Debug\net9.0-windows\DataRunner.App.exe

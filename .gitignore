@@ -1,0 +1,74 @@
+# =====================================================================
+#  SC-DataRunnerNet — git ignore rules
+# =====================================================================
+#
+# IMPORTANT — credential storage:
+#   The user secret-key and the app bearer token are NEVER stored inside
+#   the repo. They live encrypted (Windows DPAPI) in:
+#       %LOCALAPPDATA%\SC-DataRunnerNet\secret.dat
+#       %LOCALAPPDATA%\SC-DataRunnerNet\bearer.dat
+#   The rules below are belt-and-suspenders defense for the case where
+#   someone accidentally drops a secret file inside the working tree.
+# =====================================================================
+
+# ---- .NET build outputs ----
+bin/
+obj/
+*.user
+*.suo
+.vs/
+publish/
+out/
+
+# ---- IDE / editor noise ----
+.idea/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+
+# ---- OCR runtime data (downloaded models, hundreds of MB) ----
+**/tessdata/
+**/.paddleocr/
+**/PaddleOCR/
+
+# ---- Generated benchmarks (keep folder, ignore content) ----
+results/*.md
+results/*.json
+!results/.gitkeep
+
+# ---- Local logs ----
+logs/
+*.log
+
+# ---- Local DB / persisted state (in case tests dump it next to the repo) ----
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+prefs.json
+secret.dat
+bearer.dat
+
+# ---- Secrets / credentials (defense in depth — files like these should
+#       never appear inside the working tree, but if someone drops one
+#       by mistake, git won't pick it up). ----
+secrets.json
+appsettings.Local.json
+appsettings.local.json
+appsettings.Development.local.json
+*.secret
+*.secrets
+*.pfx
+*.p12
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# ---- OS junk ----
+Thumbs.db
+ehthumbs.db
+.DS_Store
+desktop.ini

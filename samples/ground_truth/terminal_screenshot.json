@@ -1,0 +1,13 @@
+{
+  "image": "terminal_screenshot.jpg",
+  "terminal": "EVERUS HARBOR",
+  "terminalType": "buy",
+  "rows": [
+    { "commodity": "SCRAP",    "quantity": "3,000 SCU",  "price": "1.42599999M/SCU" },
+    { "commodity": "IRON",     "quantity": "21,600 SCU", "price": "323/SCU" },
+    { "commodity": "STEEL",    "quantity": "12,000 SCU", "price": "535/SCU" },
+    { "commodity": "TUNGSTEN", "quantity": "10,800 SCU", "price": "525/SCU" },
+    { "commodity": "TITANIUM", "quantity": "21,600 SCU", "price": "395/SCU" }
+  ],
+  "expectedText": "COMMODITIES\nCURRENT BALANCE\nYOUR INVENTORIES\nEVERUS HARBOR\nIN DEMAND\nNO DEMAND\nCANNOT SELL\nSHOP INVENTORY\nBUY\nLOCAL MARKET VALUE\nIN STOCK\nSCRAP\nMAX INVENTORY\nSHOP QUANTITY\n3,000 SCU\n1.42599999M/SCU\nAVAILABLE CARGO SIZE (SCU)\n1 2 4 8 16 24 32\nIRON\nMAX INVENTORY\nSHOP QUANTITY\n21,600 SCU\n323/SCU\nAVAILABLE CARGO SIZE (SCU)\n8 16 24 32\nSTEEL\nMAX INVENTORY\nSHOP QUANTITY\n12,000 SCU\n535/SCU\nTUNGSTEN\nMAX INVENTORY\nSHOP QUANTITY\n10,800 SCU\n525/SCU\nAVAILABLE CARGO SIZE (SCU)\n8 16 24 32\nTITANIUM\nMAX INVENTORY\nSHOP QUANTITY\n21,600 SCU\n395/SCU"
+}

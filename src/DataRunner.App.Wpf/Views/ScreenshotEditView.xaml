@@ -1,0 +1,331 @@
+<UserControl x:Class="DataRunner.App.Views.ScreenshotEditView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:DataRunner.App.ViewModels"
+             xmlns:models="clr-namespace:DataRunner.Core.Models;assembly=DataRunner.Core"
+             xmlns:sys="clr-namespace:System;assembly=mscorlib"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             d:DataContext="{d:DesignInstance Type=vm:ScreenshotEditViewModel}"
+             mc:Ignorable="d"
+             d:DesignHeight="700" d:DesignWidth="900"
+             xml:lang="en-US">
+
+    <UserControl.Resources>
+        <ObjectDataProvider x:Key="StatusValues" MethodName="GetValues" ObjectType="{x:Type sys:Enum}">
+            <ObjectDataProvider.MethodParameters>
+                <x:Type TypeName="models:InventoryStatus" />
+            </ObjectDataProvider.MethodParameters>
+        </ObjectDataProvider>
+        <ObjectDataProvider x:Key="TabValues" MethodName="GetValues" ObjectType="{x:Type sys:Enum}">
+            <ObjectDataProvider.MethodParameters>
+                <x:Type TypeName="models:TerminalTab" />
+            </ObjectDataProvider.MethodParameters>
+        </ObjectDataProvider>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="240" MinHeight="120" />
+            <RowDefinition Height="6" />
+            <RowDefinition Height="*" MinHeight="320" />
+        </Grid.RowDefinitions>
+
+        <!-- TOP: image preview (drag the splitter to resize, click to open viewer) -->
+        <Border Grid.Row="0"
+                Background="Black"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                BorderThickness="0,0,0,1">
+            <Grid>
+                <Image x:Name="PreviewImageThumb"
+                       Source="{Binding PreviewImage}"
+                       Stretch="Uniform"
+                       Margin="8"
+                       Cursor="Hand"
+                       MouseLeftButtonUp="PreviewImage_MouseLeftButtonUp"
+                       ToolTip="Click to open in full-screen viewer (zoom + pan)" />
+
+                <Border VerticalAlignment="Top" HorizontalAlignment="Left"
+                        Margin="16,12,0,0" Padding="8,4"
+                        Background="#88000000" CornerRadius="4"
+                        IsHitTestVisible="False">
+                    <TextBlock Text="{Binding SourceImagePath}"
+                               Foreground="White" FontSize="11" Opacity="0.85"
+                               TextTrimming="CharacterEllipsis" MaxWidth="520" />
+                </Border>
+
+                <Border VerticalAlignment="Top" HorizontalAlignment="Right"
+                        Margin="0,12,16,0" Padding="8,4"
+                        Background="#88000000" CornerRadius="4"
+                        IsHitTestVisible="False">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="ZoomIn24" Foreground="White" FontSize="13" Margin="0,0,4,0" />
+                        <TextBlock Text="Click to zoom" Foreground="White" FontSize="11" Opacity="0.85" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <GridSplitter Grid.Row="1"
+                      Height="6"
+                      HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                      Background="Transparent"
+                      ShowsPreview="True"
+                      Cursor="SizeNS"
+                      ResizeBehavior="PreviousAndNext" />
+
+        <!-- BOTTOM: edit form (full width) -->
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="20,16,20,16">
+
+                <TextBlock Text="Validate before submission"
+                           FontSize="22" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0,4,0,16"
+                           Text="The OCR pipeline produced a draft. Review every value, fix what's wrong, then send to UEX. Submissions are sent in TEST mode by default (is_production=0)." />
+
+                <!-- TERMINAL CARD -->
+                <ui:Card Margin="0,0,0,12" Padding="16">
+                    <StackPanel>
+                        <DockPanel>
+                            <TextBlock Text="TERMINAL" Opacity="0.6" FontSize="11"
+                                       FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <ui:Button DockPanel.Dock="Right"
+                                       HorizontalAlignment="Right"
+                                       Appearance="Secondary"
+                                       Padding="10,4"
+                                       Command="{Binding ReRunOcrCommand}"
+                                       ToolTip="Re-run the OCR pipeline on this screenshot">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="ArrowClockwise24" Margin="0,0,4,0" FontSize="14" />
+                                    <TextBlock Text="Re-run OCR" FontSize="11" />
+                                </StackPanel>
+                            </ui:Button>
+                            <TextBlock HorizontalAlignment="Right" Margin="0,0,10,0"
+                                       Text="{Binding TerminalMatchScore, StringFormat='match {0:F0}/100'}"
+                                       FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
+                        </DockPanel>
+
+                        <Grid Margin="0,8,0,0">
+                            <ui:TextBox x:Name="TerminalSearchBox"
+                                        Text="{Binding TerminalSearch, UpdateSourceTrigger=PropertyChanged}"
+                                        PlaceholderText="Search terminal by name, code, station, outpost…"
+                                        GotKeyboardFocus="TerminalSearchBox_GotKeyboardFocus" />
+                            <Popup IsOpen="{Binding IsTerminalDropDownOpen, Mode=TwoWay}"
+                                   PlacementTarget="{Binding ElementName=TerminalSearchBox}"
+                                   Placement="Bottom"
+                                   StaysOpen="False"
+                                   AllowsTransparency="True"
+                                   PopupAnimation="Fade"
+                                   Width="{Binding ActualWidth, ElementName=TerminalSearchBox}">
+                                <Border Background="{DynamicResource ApplicationBackgroundBrush}"
+                                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1" CornerRadius="6"
+                                        Padding="0" Margin="0,4,0,0">
+                                    <ListBox MaxHeight="280"
+                                             ItemsSource="{Binding TerminalSuggestions}"
+                                             Background="Transparent"
+                                             BorderThickness="0">
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="Padding" Value="10,6" />
+                                                <EventSetter Event="PreviewMouseLeftButtonUp"
+                                                             Handler="TerminalSuggestion_Picked" />
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding LocationLabel}"
+                                                               FontSize="11" Opacity="0.65"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
+                            </Popup>
+                        </Grid>
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="TAB" Opacity="0.6" FontSize="11"
+                                           FontWeight="SemiBold" />
+                                <ComboBox Margin="0,4,0,0"
+                                          ItemsSource="{Binding Source={StaticResource TabValues}}"
+                                          SelectedItem="{Binding Tab, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                <TextBlock Text="CONTAINER SIZES (SCU)" Opacity="0.6" FontSize="11"
+                                           FontWeight="SemiBold" />
+                                <ui:TextBox Margin="0,4,0,0"
+                                            Text="{Binding ContainerSizes, UpdateSourceTrigger=PropertyChanged}"
+                                            PlaceholderText="e.g. 1,2,4,8,16,24,32" />
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock FontSize="11" Opacity="0.55" Margin="0,8,0,0"
+                                   Text="{Binding TerminalFromOcr, StringFormat='OCR fragment: {0}'}" />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- ROWS -->
+                <ui:Card Margin="0,0,0,12" Padding="0">
+                    <StackPanel>
+                        <DockPanel Margin="16,12,16,8">
+                            <TextBlock Text="COMMODITY ROWS" Opacity="0.6" FontSize="11"
+                                       FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <ui:Button DockPanel.Dock="Right"
+                                       HorizontalAlignment="Right"
+                                       Appearance="Secondary"
+                                       Command="{Binding AddRowCommand}"
+                                       Padding="10,6">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Add24" Margin="0,0,4,0" />
+                                    <TextBlock Text="Add row" />
+                                </StackPanel>
+                            </ui:Button>
+                        </DockPanel>
+
+                        <DataGrid ItemsSource="{Binding Rows}"
+                                  AutoGenerateColumns="False"
+                                  HeadersVisibility="Column"
+                                  GridLinesVisibility="None"
+                                  BorderThickness="0"
+                                  CanUserAddRows="False"
+                                  CanUserDeleteRows="False"
+                                  CanUserReorderColumns="False"
+                                  CanUserResizeColumns="True"
+                                  RowHeight="40"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  Background="Transparent">
+                            <DataGrid.Columns>
+                                <DataGridTemplateColumn Header="Commodity" Width="2*" MinWidth="160">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <ComboBox ItemsSource="{Binding DataContext.CommodityOptions, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                      SelectedItem="{Binding Commodity, UpdateSourceTrigger=PropertyChanged}"
+                                                      DisplayMemberPath="Name"
+                                                      IsEditable="True"
+                                                      IsTextSearchEnabled="True"
+                                                      IsTextSearchCaseSensitive="False"
+                                                      TextSearch.TextPath="Name"
+                                                      StaysOpenOnEdit="True"
+                                                      Margin="2" />
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <DataGridTextColumn Header="SCU" Width="90" MinWidth="70"
+                                                    Binding="{Binding ScuValue, UpdateSourceTrigger=LostFocus, Converter={StaticResource SmartNumber}}">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Right" />
+                                            <Setter Property="Margin" Value="0,0,8,0" />
+                                            <Setter Property="VerticalAlignment" Value="Center" />
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+
+                                <DataGridTextColumn Header="Price (aUEC/SCU)" Width="130" MinWidth="100"
+                                                    Binding="{Binding PriceValue, UpdateSourceTrigger=LostFocus, Converter={StaticResource SmartNumber}}">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Right" />
+                                            <Setter Property="Margin" Value="0,0,8,0" />
+                                            <Setter Property="VerticalAlignment" Value="Center" />
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+
+                                <DataGridTemplateColumn Header="Status" Width="*" MinWidth="120">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <ComboBox ItemsSource="{Binding Source={StaticResource StatusValues}}"
+                                                      SelectedItem="{Binding Status, UpdateSourceTrigger=PropertyChanged}"
+                                                      Margin="2" />
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <DataGridTextColumn Header="Match" Width="56" MinWidth="48"
+                                                    Binding="{Binding MatchScore, StringFormat=F0}"
+                                                    IsReadOnly="True">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Right" />
+                                            <Setter Property="Margin" Value="0,0,4,0" />
+                                            <Setter Property="VerticalAlignment" Value="Center" />
+                                            <Setter Property="Opacity" Value="0.7" />
+                                            <Setter Property="FontSize" Value="11" />
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+
+                                <DataGridTemplateColumn Width="36">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <ui:Button Appearance="Transparent"
+                                                       Padding="4"
+                                                       Command="{Binding DataContext.RemoveRowCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                       CommandParameter="{Binding}"
+                                                       ToolTip="Remove this row">
+                                                <ui:SymbolIcon Symbol="Delete24" />
+                                            </ui:Button>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- METADATA CARD -->
+                <ui:CardExpander Margin="0,0,0,12" Header="Optional metadata (game version, details)">
+                    <StackPanel Margin="16,4,16,12">
+                        <TextBlock Text="GAME VERSION" Opacity="0.6" FontSize="11"
+                                   FontWeight="SemiBold" />
+                        <ui:TextBox Margin="0,4,0,12"
+                                    Text="{Binding GameVersion, UpdateSourceTrigger=PropertyChanged}"
+                                    PlaceholderText="e.g. 4.7.2 LIVE" />
+
+                        <TextBlock Text="DETAILS / NOTES" Opacity="0.6" FontSize="11"
+                                   FontWeight="SemiBold" />
+                        <ui:TextBox Margin="0,4,0,0"
+                                    Text="{Binding Details, UpdateSourceTrigger=PropertyChanged}"
+                                    PlaceholderText="Optional context for the report" />
+                    </StackPanel>
+                </ui:CardExpander>
+
+                <!-- ACTION BAR -->
+                <Border Margin="0,8,0,0" Padding="0,12,0,0"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="0,1,0,0">
+                    <DockPanel>
+                        <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center"
+                                  IsChecked="{Binding IsProduction}"
+                                  Content="is_production = 1 (commit live to UEX)"
+                                  Foreground="IndianRed" />
+                        <ui:Button DockPanel.Dock="Right"
+                                   HorizontalAlignment="Right"
+                                   Appearance="Primary"
+                                   Padding="22,10"
+                                   Command="{Binding SubmitCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Send to UEX" FontWeight="SemiBold" />
+                                <ui:SymbolIcon Symbol="ArrowUpload24" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </ui:Button>
+                    </DockPanel>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>
