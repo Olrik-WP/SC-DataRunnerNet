@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -28,6 +29,22 @@ public sealed partial class InboxViewModel : ObservableObject
 
     [ObservableProperty] private InboxItem? _selectedItem;
     [ObservableProperty] private ScreenshotEditViewModel? _currentEditor;
+
+    /// <summary>
+    /// True when the currently selected item is still being processed by the OCR
+    /// pipeline. The view binds the editor placeholder against this flag to show
+    /// "OCR in progress" instead of the generic "pick a screenshot" hint, and
+    /// to make sure no half-baked editor is rendered before the submission is
+    /// fully populated.
+    /// </summary>
+    [ObservableProperty] private bool _isSelectedProcessing;
+
+    /// <summary>
+    /// Holds the currently observed item so we can unhook the property-changed
+    /// listener when the user picks another one. Without this we'd leak handlers
+    /// every time the selection changes.
+    /// </summary>
+    private InboxItem? _selectionListener;
 
     /// <summary>
     /// Drives both the visibility AND the IsEnabled state of the Merge button.
@@ -78,14 +95,57 @@ public sealed partial class InboxViewModel : ObservableObject
 
     partial void OnSelectedItemChanged(InboxItem? value)
     {
+        // Detach from any previously observed item so we don't double-handle
+        // status transitions after the selection moves.
+        if (_selectionListener is not null)
+        {
+            _selectionListener.PropertyChanged -= OnSelectedItemPropertyChanged;
+            _selectionListener = null;
+        }
+
         if (value is null)
+        {
+            CurrentEditor = null;
+            IsSelectedProcessing = false;
+            return;
+        }
+
+        // Keep observing this item's Status so the editor auto-opens once OCR
+        // completes (Pending/Processing -> Ready/Review). Without this, the
+        // user would have to click the item again after OCR finishes.
+        _selectionListener = value;
+        value.PropertyChanged += OnSelectedItemPropertyChanged;
+        OpenEditorIfReady(value);
+    }
+
+    private void OnSelectedItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(InboxItem.Status)) return;
+        if (sender is not InboxItem item) return;
+        if (!ReferenceEquals(item, SelectedItem)) return;
+        OpenEditorIfReady(item);
+    }
+
+    /// <summary>
+    /// Loads the editor for <paramref name="item"/> only if its OCR is done.
+    /// While the item is Pending or Processing we leave the editor closed and
+    /// surface a dedicated placeholder via <see cref="IsSelectedProcessing"/>.
+    /// Otherwise (Ready / Review / Sent / Failed) we instantiate a fresh editor
+    /// and hand the item to it.
+    /// </summary>
+    private void OpenEditorIfReady(InboxItem item)
+    {
+        var processing = item.Status is InboxStatus.Pending or InboxStatus.Processing;
+        IsSelectedProcessing = processing;
+
+        if (processing)
         {
             CurrentEditor = null;
             return;
         }
 
         var editor = App.Resolve<ScreenshotEditViewModel>();
-        editor.Load(value);
+        editor.Load(item);
         CurrentEditor = editor;
     }
 
@@ -113,7 +173,7 @@ public sealed partial class InboxViewModel : ObservableObject
                 Items.Add(new InboxItem
                 {
                     ImagePath = path,
-                    DisplayName = Path.GetFileName(path),
+                    DisplayName = InboxItem.FormatDisplayName(path),
                     Status = InboxStatus.Pending,
                     AddedAt = DateTimeOffset.Now,
                     SourcePaths = new() { path },
@@ -290,6 +350,60 @@ public sealed partial class InboxItem : ObservableObject
     [ObservableProperty] private string? _terminalLabel;
     [ObservableProperty] private int _rowCount;
     [ObservableProperty] private string? _statusReason;
+
+    /// <summary>
+    /// Strips the redundant "ScreenShot-" prefix and file extension from a Star
+    /// Citizen screenshot file name to get a compact display label that fits in
+    /// the inbox card without truncating the status text.
+    ///
+    /// Examples:
+    ///   "ScreenShot-2026-05-02_22-58-28-DB6.jpg" -> "2026-05-02 22:58:28"
+    ///   "ScreenShot-2026-05-02_22-58-28.jpg"     -> "2026-05-02 22:58:28"
+    /// Falls back to the raw file name (without extension) for non-SC files.
+    /// </summary>
+    public static string FormatDisplayName(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "";
+        var name = System.IO.Path.GetFileNameWithoutExtension(path);
+
+        // SC pattern: ScreenShot-YYYY-MM-DD_HH-MM-SS[-XXX]
+        // The trailing "-XXX" is a 3-character hex tag (eg. "DB6", "8AF") that
+        // some SC builds append after the timestamp. It's optional — we can't
+        // assume it's there.
+        const string scPrefix = "ScreenShot-";
+        if (name.StartsWith(scPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = name[scPrefix.Length..];
+
+            // Strip the trailing hex tag ONLY when it really looks like one.
+            // Naively cutting at the last '-' would also eat the "-SS" seconds
+            // segment for filenames that have no hex tag (truncating
+            // "2026-05-02_22-58-28" to "2026-05-02_22-58" -> "2026-05-02 22:58").
+            // The hex tag is 3-4 chars long AND contains at least one letter
+            // (the timestamp pieces are always pure digits), so we use that to
+            // distinguish them.
+            var lastDash = rest.LastIndexOf('-');
+            if (lastDash > 0 && lastDash < rest.Length - 1)
+            {
+                var tail = rest[(lastDash + 1)..];
+                if (tail.Length is 3 or 4 && tail.Any(char.IsLetter))
+                {
+                    rest = rest[..lastDash];
+                }
+            }
+
+            var underscore = rest.IndexOf('_');
+            if (underscore > 0 && underscore < rest.Length - 1)
+            {
+                var date = rest[..underscore];
+                var time = rest[(underscore + 1)..].Replace('-', ':');
+                return $"{date} {time}";
+            }
+            return rest;
+        }
+
+        return name;
+    }
 
     private System.Windows.Media.Imaging.BitmapImage? _thumbnail;
 

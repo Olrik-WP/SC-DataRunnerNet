@@ -165,7 +165,6 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
 
                                     <!-- Status dot + thumbnail. Click on the thumbnail opens
@@ -184,18 +183,26 @@
                                         </Border>
                                     </StackPanel>
 
-                                    <!-- Text block: name, terminal · system, count + age. -->
+                                    <!-- Text block: name, terminal · system, status + count + age, reason. -->
                                     <StackPanel Grid.Column="1" VerticalAlignment="Top">
                                         <TextBlock Text="{Binding DisplayName}"
                                                    FontWeight="SemiBold"
-                                                   TextTrimming="CharacterEllipsis" />
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding ImagePath}" />
                                         <TextBlock Text="{Binding TerminalLabel}"
                                                    FontSize="11" Opacity="0.8"
                                                    TextTrimming="CharacterEllipsis"
                                                    Margin="0,2,0,0" />
-                                        <TextBlock FontSize="10" Opacity="0.6" Margin="0,4,0,0">
+                                        <!-- Status text + row count + age on one compact line.
+                                             Status is also encoded in the dot colour and the
+                                             card background tint, but having it as text avoids
+                                             color-only encoding and helps accessibility. -->
+                                        <TextBlock FontSize="10" Opacity="0.7" Margin="0,4,0,0"
+                                                   TextWrapping="Wrap">
+                                            <Run Text="{Binding Status, Mode=OneWay}" FontWeight="SemiBold" />
+                                            <Run Text=" · " />
                                             <Run Text="{Binding RowCount, Mode=OneWay}" />
-                                            <Run Text=" rows · added " />
+                                            <Run Text=" rows · " />
                                             <Run Text="{Binding AddedAt, StringFormat='HH:mm:ss', Mode=OneWay}" />
                                         </TextBlock>
                                         <TextBlock Text="{Binding StatusReason}"
@@ -203,14 +210,6 @@
                                                    Margin="0,2,0,0"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
-
-                                    <!-- Status badge stays as a textual hint; redundant with
-                                         the dot but useful for screen-readers / accessibility. -->
-                                    <Border Grid.Column="2" CornerRadius="3" Padding="6,2"
-                                            VerticalAlignment="Top"
-                                            Background="#33000000">
-                                        <TextBlock Text="{Binding Status}" FontSize="10" />
-                                    </Border>
                                 </Grid>
                             </Border>
                         </DataTemplate>
@@ -250,12 +249,32 @@
                 </ContentControl>
             </Border>
 
-            <!-- Empty state (shown only when nothing is selected) -->
-            <Border IsHitTestVisible="False"
-                    Visibility="{Binding DataContext.CurrentEditor,
-                                          ElementName=EditorPanel,
-                                          Converter={StaticResource BoolToVisibility},
-                                          ConverterParameter=invert}">
+            <!-- Empty state — split into two mutually-exclusive views:
+                 • "Pick a screenshot" when no item is selected
+                 • "OCR in progress" when the selected item is still being
+                   processed (the editor stays closed until OCR completes,
+                   then OpenEditorIfReady auto-opens it).
+                 Both Visibility values are computed entirely inside the Style
+                 so triggers can override them; setting Visibility directly on
+                 the element would override the trigger and cause overlap. -->
+
+            <!-- Idle empty state: visible only when there's no editor AND no
+                 selection to wait on. -->
+            <Border IsHitTestVisible="False">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding DataContext.CurrentEditor, ElementName=EditorPanel, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" Value="Visible" />
+                                    <Condition Binding="{Binding DataContext.IsSelectedProcessing, ElementName=EditorPanel}" Value="False" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.55">
                     <ui:SymbolIcon Symbol="ImageEdit24" FontSize="48" HorizontalAlignment="Center" />
                     <TextBlock Text="Pick a screenshot in the inbox to start"
@@ -263,6 +282,28 @@
                                HorizontalAlignment="Center" />
                     <TextBlock Text="Or click 'Import images' to add some."
                                FontSize="12" Opacity="0.7" Margin="0,4,0,0"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
+            </Border>
+
+            <!-- OCR in-progress placeholder. Shown while the selected item is
+                 Pending/Processing. -->
+            <Border IsHitTestVisible="False"
+                    Visibility="{Binding DataContext.IsSelectedProcessing,
+                                          ElementName=EditorPanel,
+                                          Converter={StaticResource BoolToVisibility}}">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.7">
+                    <ui:ProgressRing IsIndeterminate="True"
+                                     Width="48" Height="48"
+                                     HorizontalAlignment="Center" />
+                    <TextBlock Text="OCR in progress…"
+                               FontSize="16" FontWeight="SemiBold"
+                               Margin="0,16,0,0"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="The editor will open automatically when the results are ready."
+                               FontSize="12" Opacity="0.7" Margin="0,4,0,0"
+                               TextWrapping="Wrap" MaxWidth="320"
+                               TextAlignment="Center"
                                HorizontalAlignment="Center" />
                 </StackPanel>
             </Border>

@@ -20,9 +20,18 @@ public sealed partial class ConfirmSubmitViewModel : ObservableObject
     public ObservableCollection<ValidationIssue> Issues { get; } = new();
     public ObservableCollection<DuplicateFinding> Findings { get; } = new();
 
+    /// <summary>
+    /// Set by the editor when constructing this dialog. Reflects the user's
+    /// global preference (Settings -> "Send submissions in PRODUCTION mode by
+    /// default"). Not editable in the dialog anymore — the per-screenshot
+    /// toggle was a footgun (one accidental flick committed live data).
+    /// </summary>
     [ObservableProperty] private bool _isProduction;
     [ObservableProperty] private bool _acknowledgeWarnings;
     [ObservableProperty] private bool _overrideBlock;
+
+    /// <summary>Read-only label shown in the footer: "TEST" or "PRODUCTION (live)".</summary>
+    public string ModeLabel => IsProduction ? "PRODUCTION (live to UEX)" : "TEST (recorded only)";
 
     public bool HasBlockingIssues =>
         Validation.IsBlocking || Duplicates.Worst == DuplicateSeverity.Block;
@@ -63,6 +72,10 @@ public sealed partial class ConfirmSubmitViewModel : ObservableObject
     }
 
     partial void OnAcknowledgeWarningsChanged(bool value) => OnPropertyChanged(nameof(CanSend));
-    partial void OnIsProductionChanged(bool value) => OnPropertyChanged(nameof(CanSend));
+    partial void OnIsProductionChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanSend));
+        OnPropertyChanged(nameof(ModeLabel));
+    }
     partial void OnOverrideBlockChanged(bool value) => OnPropertyChanged(nameof(CanSend));
 }

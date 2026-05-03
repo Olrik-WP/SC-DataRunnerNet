@@ -26,11 +26,13 @@
     </UserControl.Resources>
 
     <!-- Three-row layout:
-           Row 0 (Auto)  : compact title bar
-           Row 1 (*)     : split body — scrollable form on the left, sticky preview on the right
+           Row 0 (Auto)  : compact title bar with "Show screenshot" action
+           Row 1 (*)     : full-width scrollable form (terminal + commodities + metadata)
            Row 2 (Auto)  : sticky validation panel + send action bar (NEVER scrolled away)
-         The preview no longer hogs the top of the screen; it lives in a side column
-         the user can resize via the inner GridSplitter. -->
+         The screenshot preview is no longer rendered inline (it was eating ~40% of
+         the editor width while showing mostly black padding). Instead, the title
+         bar exposes a "Show screenshot" button that opens the same full-screen
+         viewer (with zoom + pan) that the inbox thumbnail click uses. -->
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -38,25 +40,37 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Row 0: compact title bar -->
-        <StackPanel Grid.Row="0" Margin="20,12,20,8">
-            <TextBlock Text="Validate before submission"
-                       FontSize="20" FontWeight="SemiBold"
-                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-            <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0,2,0,0" FontSize="11"
-                       Text="Review every value before clicking Send. Submissions default to TEST mode (is_production=0)." />
-        </StackPanel>
-
-        <!-- Row 1: split body — form left, preview right -->
-        <Grid Grid.Row="1" Margin="20,0,20,8">
+        <!-- Row 0: compact title bar with screenshot action on the right -->
+        <Grid Grid.Row="0" Margin="20,12,20,8">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MinWidth="420" />
-                <ColumnDefinition Width="6" />
-                <ColumnDefinition Width="320" MinWidth="220" MaxWidth="600" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <!-- LEFT column: scrollable form (terminal card + commodities + metadata) -->
-            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="Validate before submission"
+                           FontSize="20" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0,2,0,0" FontSize="11"
+                           Text="Review every value before clicking Send. The submission mode (LIVE / TEST) is set globally in Settings." />
+            </StackPanel>
+
+            <ui:Button Grid.Column="1"
+                       VerticalAlignment="Center"
+                       Appearance="Secondary"
+                       Padding="12,7"
+                       Click="ShowScreenshot_Click"
+                       ToolTip="Open the source screenshot in a full-screen viewer (zoom + pan).">
+                <StackPanel Orientation="Horizontal">
+                    <ui:SymbolIcon Symbol="Image24" Margin="0,0,6,0" />
+                    <TextBlock Text="Show screenshot" />
+                </StackPanel>
+            </ui:Button>
+        </Grid>
+
+        <!-- Row 1: full-width scrollable form -->
+        <Grid Grid.Row="1" Margin="20,0,20,8">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel>
 
                 <!-- TERMINAL CARD -->
@@ -179,6 +193,8 @@
                         </Grid>
 
                         <TextBlock FontSize="11" Opacity="0.55" Margin="0,8,0,0"
+                                   TextWrapping="Wrap"
+                                   FontFamily="Cascadia Mono, Consolas, monospace"
                                    Text="{Binding TerminalFromOcr, StringFormat='OCR fragment: {0}'}" />
                     </StackPanel>
                 </ui:Card>
@@ -276,6 +292,19 @@
                                 </DataGridTextColumn>
 
                                 <DataGridTemplateColumn Header="Status" Width="*" MinWidth="120">
+                                    <DataGridTemplateColumn.CellStyle>
+                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+                                            <Style.Triggers>
+                                                <!-- Tint the cell orange when the inventory status was not detected
+                                                     by OCR. This is consistent with the orange Warning band in the
+                                                     validation footer ("inventory status is Unknown — pick one"). -->
+                                                <DataTrigger Binding="{Binding StatusIsUnknown}" Value="True">
+                                                    <Setter Property="Background" Value="#33DAA520" />
+                                                    <Setter Property="ToolTip" Value="OCR did not detect this row's inventory status — pick one (Maximum / High / ...)." />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGridTemplateColumn.CellStyle>
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <ComboBox ItemsSource="{Binding Source={StaticResource StatusValues}}"
@@ -344,51 +373,6 @@
 
                 </StackPanel>
             </ScrollViewer>
-
-            <!-- Vertical splitter between form and preview. -->
-            <GridSplitter Grid.Column="1"
-                          Width="6"
-                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                          Background="Transparent"
-                          ShowsPreview="False"
-                          Cursor="SizeWE"
-                          ResizeBehavior="PreviousAndNext" />
-
-            <!-- RIGHT column: sticky preview. Click → opens full-screen viewer. -->
-            <Border Grid.Column="2"
-                    Background="Black"
-                    CornerRadius="6"
-                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1">
-                <Grid>
-                    <Image x:Name="PreviewImageThumb"
-                           Source="{Binding PreviewImage}"
-                           Stretch="Uniform"
-                           Margin="6"
-                           Cursor="Hand"
-                           MouseLeftButtonUp="PreviewImage_MouseLeftButtonUp"
-                           ToolTip="Click to open in full-screen viewer (zoom + pan)" />
-
-                    <Border VerticalAlignment="Top" HorizontalAlignment="Left"
-                            Margin="10,8,0,0" Padding="6,3"
-                            Background="#88000000" CornerRadius="3"
-                            IsHitTestVisible="False">
-                        <TextBlock Text="{Binding SourceImagePath}"
-                                   Foreground="White" FontSize="10" Opacity="0.85"
-                                   TextTrimming="CharacterEllipsis" MaxWidth="280" />
-                    </Border>
-
-                    <Border VerticalAlignment="Top" HorizontalAlignment="Right"
-                            Margin="0,8,10,0" Padding="6,3"
-                            Background="#88000000" CornerRadius="3"
-                            IsHitTestVisible="False">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="ZoomIn24" Foreground="White" FontSize="11" Margin="0,0,3,0" />
-                            <TextBlock Text="Click to zoom" Foreground="White" FontSize="10" Opacity="0.85" />
-                        </StackPanel>
-                    </Border>
-                </Grid>
-            </Border>
         </Grid>
 
         <!-- Row 2: STICKY validation panel + send action bar. Lives outside any
@@ -454,11 +438,27 @@
                     </StackPanel>
                 </ui:Card>
 
+                <!-- Manual override: visible ONLY when blocking errors are present.
+                     Lets the user bypass the safety net by explicitly acknowledging
+                     they reviewed every value themselves. Reset to false on every
+                     screenshot Load() so the safety net is on by default. -->
+                <Border Margin="0,0,0,8" Padding="10,8"
+                        CornerRadius="4"
+                        Background="#33C8504F" BorderBrush="#88C8504F" BorderThickness="1"
+                        Visibility="{Binding HasBlockingErrors, Converter={StaticResource BoolToVisibility}}">
+                    <CheckBox IsChecked="{Binding UserOverrideValidation}"
+                              Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+                        <TextBlock TextWrapping="Wrap">
+                            <Run Text="I have manually reviewed every value above" FontWeight="SemiBold" />
+                            <Run Text=" — submit anyway despite the blocking errors." />
+                        </TextBlock>
+                    </CheckBox>
+                </Border>
+
+                <!-- The send action is the only thing in this row now: the
+                     production-mode toggle lives in Settings and applies to
+                     every screenshot to avoid forgetting to flip it back. -->
                 <DockPanel>
-                    <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center"
-                              IsChecked="{Binding IsProduction}"
-                              Content="is_production = 1 (commit live to UEX)"
-                              Foreground="IndianRed" />
                     <ui:Button DockPanel.Dock="Right"
                                HorizontalAlignment="Right"
                                Appearance="Primary"

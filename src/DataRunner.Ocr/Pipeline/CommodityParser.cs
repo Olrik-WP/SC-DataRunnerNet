@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using DataRunner.Core.Models;
 using DataRunner.Ocr.Matching;
@@ -34,23 +35,59 @@ public sealed class CommodityParser
         "BUY", "SELL", "SELECT SUB-CATEGORY", "QUALITY",
     };
 
+    // Helper: tolerated character classes for OCR-typical confusions inside
+    // the word "INVENTORY". I↔1, E↔3, O↔0 are the most common substitutions.
+    private const string InvWord = @"[I1]NV[E3]NT[O0]RY";
+    // Separator between the modifier word ("MAX") and "INVENTORY". OCR often
+    // injects a stray period or comma here, eg. "MAX. INVENTORY" or
+    // "MAX,INVENTORY". We also allow zero whitespace ("MAXINVENTORY"), which
+    // happens when PaddleOCR fuses two adjacent text regions on the same Y.
+    private const string Sep = @"[.,;:\s]*";
+
+    /// <summary>
+    /// Strict regex patterns for inventory status detection. We tried fuzzy
+    /// PartialRatio matching against canonical phrases but it cross-matched
+    /// "MAX INVENTORY" with "MEDIUM INVENTORY" because they share the long
+    /// "INVENTORY" suffix (~80% substring overlap). Strict regex with
+    /// explicit word boundaries is the right primitive here; we sprinkle in
+    /// well-known OCR substitutions to absorb typical recognition noise:
+    ///   - [MN] for the leading letter of MAX/MEDIUM (M↔N is a frequent
+    ///     PaddleOCR confusion when an icon abuts the text on the left,
+    ///     observed on the "bag-icon" rows in SC's Daekens Research Outpost).
+    ///   - [.,;:\s]* between the modifier and INVENTORY (catches "MAX.
+    ///     INVENTORY", "MAXINVENTORY", "MAX,INVENTORY").
+    ///   - 1↔I, 3↔E, 0↔O inside INVENTORY itself.
+    /// When even this fails the status stays Unknown and the user fixes it
+    /// via the orange-tinted cell in the editor.
+    /// </summary>
     private static readonly (Regex Pattern, InventoryStatus Status)[] StatusPatterns =
     {
-        (new Regex(@"\bMAXIMUM\s*INVENTORY\b|\bMAX\s*INVENTORY\b|\bFULL\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.Maximum),
-        (new Regex(@"\bVERY\s*HIGH\s*INVENTORY\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.VeryHigh),
-        (new Regex(@"\bHIGH\s*INVENTORY\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.High),
-        (new Regex(@"\bMEDIUM\s*INVENTORY\b|\bMED\s*INVENTORY\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.Medium),
-        (new Regex(@"\bVERY\s*LOW\s*INVENTORY\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.VeryLow),
-        (new Regex(@"\bLOW\s*INVENTORY\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.Low),
-        (new Regex(@"\bOUT\s*OF\s*STOCK\b|\bEMPTY\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.OutOfStock),
+        (new Regex($@"\b(?:MAXIMUM|[MN]AX){Sep}{InvWord}\b|\bFULL\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.Maximum),
+        (new Regex($@"\bVERY{Sep}HIGH{Sep}{InvWord}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.VeryHigh),
+        (new Regex($@"\bHIGH{Sep}{InvWord}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.High),
+        (new Regex($@"\b(?:[MN]EDIUM|[MN]ED){Sep}{InvWord}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.Medium),
+        (new Regex($@"\bVERY{Sep}LOW{Sep}{InvWord}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.VeryLow),
+        (new Regex($@"\bLOW{Sep}{InvWord}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.Low),
+        (new Regex(@"\bOUT\s*OF\s*ST[O0]CK\b|\bEMPTY\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), InventoryStatus.OutOfStock),
     };
 
-    private static readonly int[] KnownContainerSizes = { 32, 24, 16, 8, 4, 2, 1 };
+    // SC always renders container sizes in ASCENDING order in the cargo bar:
+    //   "1 2 4 8 16 24 32"
+    // We rely on this to disambiguate digit runs like "124816" which a naive
+    // greedy "longest first" approach would parse as {1, 24, 8, 16}.
+    // See ExtractSizesGreedy for details.
+    private static readonly int[] KnownContainerSizesAscending = { 1, 2, 4, 8, 16, 24, 32 };
 
     private readonly FuzzyMatcher _matcher;
     private readonly int _commodityMinScore;
 
-    public CommodityParser(FuzzyMatcher matcher, int commodityMinScore = 85)
+    // Threshold tuned together with FuzzyMatcher.ScoreCommodityCandidate length
+    // penalty. With the penalty in place, false positives like "STINS" -> "TIN"
+    // are filtered out cleanly (54%), so we can accept legitimate near-matches
+    // like "STINS" -> "STIMS" (~80%) which used to be silently dropped at the
+    // old 85% threshold. The UI then flags 75-99% as "Warning" or "Error" so
+    // the user explicitly validates the choice before submission.
+    public CommodityParser(FuzzyMatcher matcher, int commodityMinScore = 75)
     {
         _matcher = matcher;
         _commodityMinScore = commodityMinScore;
@@ -91,7 +128,13 @@ public sealed class CommodityParser
 
         for (var i = 0; i < lines.Length; i++)
         {
-            var line = lines[i];
+            var rawLine = lines[i];
+
+            // Normalize ambiguous OCR'd characters in numeric-looking tokens ONLY:
+            // "B0OO" -> "8000", "30OO" -> "3000", "lI20" -> "1120", etc.
+            // Pure-letter tokens (commodity names like "BORON") are intentionally
+            // left untouched, see NormalizeNumericTokens for the heuristic.
+            var line = NormalizeNumericTokens(rawLine);
 
             var scu = ScuRegex.Match(line);
             if (scu.Success && IsLineMostlyNumber(line))
@@ -227,15 +270,36 @@ public sealed class CommodityParser
         string? lastStatusLine = null;
         var rowIdx = -1;
         var seenCommodityIds = new HashSet<int>();
+        // True after we cross a "--- ROW i ---" band marker but before the next
+        // commodity is encountered. While locked, status patterns may still be
+        // detected (so they can fall through to a future commodity in this band)
+        // but they are NEVER assigned back to the previous band's commodity.
+        // This stops section headers like "OUT OF STOCK" at the bottom of the
+        // panel from poisoning the last real commodity row when its in-band
+        // status was missed by the OCR.
+        var assignmentLocked = false;
 
         foreach (var c in classified)
         {
             if (c is null) continue;
 
+            // Band barrier emitted by PaddleOcrPipeline when row segmentation is
+            // active. Reset every status carry so nothing leaks between bands.
+            if (c.OriginalLine.StartsWith("--- ROW ", StringComparison.Ordinal))
+            {
+                lastStatus = null;
+                lastStatusLine = null;
+                assignmentLocked = true;
+                continue;
+            }
+
             if (c.Type == LineType.Commodity && c.Commodity is not null)
             {
                 if (!seenCommodityIds.Add(c.Commodity.Commodity.Id)) continue;
                 rowIdx++;
+                // We have a commodity in the current band; future status patterns
+                // can now be assigned to it.
+                assignmentLocked = false;
                 if (lastStatus is not null && rowIdx < submission.Prices.Count)
                 {
                     statusByCommodityIdx[rowIdx] = (lastStatus.Value, lastStatusLine ?? "");
@@ -255,7 +319,8 @@ public sealed class CommodityParser
                 }
             }
 
-            if (lastStatus is not null && rowIdx >= 0 && rowIdx < submission.Prices.Count
+            if (!assignmentLocked
+                && lastStatus is not null && rowIdx >= 0 && rowIdx < submission.Prices.Count
                 && submission.Prices[rowIdx].StatusBuy == InventoryStatus.Unknown)
             {
                 submission.Prices[rowIdx].StatusBuy = lastStatus.Value;
@@ -298,9 +363,20 @@ public sealed class CommodityParser
         return TerminalTab.Buy;
     }
 
+    /// <summary>
+    /// Container sizes are a TERMINAL-LEVEL field in the UEX API, but each SC
+    /// commodity row only renders the subset of sizes appropriate for that
+    /// commodity's quantity. We therefore scan EVERY "AVAILABLE CARGO SIZE"
+    /// line in the OCR output and return the UNION of all detected sizes.
+    ///
+    /// Why union (and not "row with the most sizes"): OCR sometimes loses the
+    /// dimmer / smaller / off-canvas sizes on a given row (eg. the "24 32" at
+    /// the right edge for a high-quantity commodity). Taking the union recovers
+    /// values that were correctly read on a different row of the same terminal.
+    /// </summary>
     private static string? DetectContainerSizes(string[] lines)
     {
-        HashSet<int>? bestSizes = null;
+        var unionSizes = new HashSet<int>();
 
         for (var i = 0; i < lines.Length; i++)
         {
@@ -316,36 +392,43 @@ public sealed class CommodityParser
                 if (digits.Length < 2) continue;
 
                 var sizes = ExtractSizesGreedy(digits);
-                if (sizes.Count >= 2 && (bestSizes is null || sizes.Count > bestSizes.Count))
+                if (sizes.Count >= 2)
                 {
-                    bestSizes = sizes;
+                    unionSizes.UnionWith(sizes);
                 }
             }
         }
 
-        if (bestSizes is null || bestSizes.Count == 0) return null;
-        return string.Join(",", bestSizes.OrderBy(s => s));
+        if (unionSizes.Count == 0) return null;
+        return string.Join(",", unionSizes.OrderBy(s => s));
     }
 
+    /// <summary>
+    /// Parses a continuous digit run produced by joining the cargo-size pills
+    /// from a SC commodity row into a set of recognized container sizes.
+    /// Walks the known sizes in ASCENDING order, consuming the prefix of the
+    /// remaining digits each time a size matches. This disambiguates cases
+    /// where the previous "longest-first" greedy logic would mis-merge digits.
+    ///
+    /// Examples:
+    ///   "124816"     -> {1, 2, 4, 8, 16}        (no false 24 introduced)
+    ///   "1248162432" -> {1, 2, 4, 8, 16, 24, 32}
+    ///   "48162432"   -> {4, 8, 16, 24, 32}      (small sizes dimmed/missed by OCR
+    ///                                            still produce a valid subset)
+    /// </summary>
     private static HashSet<int> ExtractSizesGreedy(string digits)
     {
         var sizes = new HashSet<int>();
         var idx = 0;
-        while (idx < digits.Length)
+        foreach (var size in KnownContainerSizesAscending)
         {
-            var matched = false;
-            foreach (var v in KnownContainerSizes)
+            var s = size.ToString();
+            if (idx + s.Length > digits.Length) break;
+            if (digits.AsSpan(idx, s.Length).SequenceEqual(s))
             {
-                var s = v.ToString();
-                if (idx + s.Length <= digits.Length && digits.Substring(idx, s.Length) == s)
-                {
-                    sizes.Add(v);
-                    idx += s.Length;
-                    matched = true;
-                    break;
-                }
+                sizes.Add(size);
+                idx += s.Length;
             }
-            if (!matched) idx++;
         }
         return sizes;
     }
@@ -420,6 +503,75 @@ public sealed class CommodityParser
         var digits = line.Count(char.IsDigit);
         return digits >= 1 && digits >= line.Length * 0.3;
     }
+
+    /// <summary>
+    /// Normalize OCR-ambiguous characters (O->0, l/I/|->1, S->5, B->8, Z->2)
+    /// inside tokens that already look numeric, leaving alphabetic tokens alone.
+    ///
+    /// Heuristic per token: substitute only if the token has at least one digit
+    /// AND (digits + ambiguous chars) cover &gt;= 70% of its length AND there is
+    /// no more than one "real" letter. This protects commodity names like BORON,
+    /// ZEROES, STIMS from being corrupted into 80R0N / 2ER0E5 / 5T1M5.
+    ///
+    /// Examples:
+    ///   "B0OO"      -> "8000"    (1 digit + 3 ambig, 0 letters)
+    ///   "30OO"      -> "3000"    (2 digits + 2 ambig, 0 letters)
+    ///   "lI20"      -> "1120"    (2 digits + 2 ambig, 0 letters)
+    ///   "5S00"      -> "5500"    (3 digits + 1 ambig, 0 letters)
+    ///   "120/SCU"   -> unchanged (3 digits + 1 ambig + 2 letters + 1 slash)
+    ///   "BORON"     -> unchanged (no digits at all)
+    /// </summary>
+    private static string NormalizeNumericTokens(string line)
+    {
+        if (string.IsNullOrEmpty(line)) return line;
+
+        var tokens = line.Split(' ');
+        var changed = false;
+
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            var t = tokens[i];
+            if (t.Length < 2) continue;
+
+            var digits = 0;
+            var ambig = 0;
+            var realLetters = 0;
+            foreach (var ch in t)
+            {
+                if (char.IsDigit(ch)) digits++;
+                else if (IsAmbiguousChar(ch)) ambig++;
+                else if (char.IsLetter(ch)) realLetters++;
+            }
+
+            if (digits == 0) continue;
+            if (realLetters > 1) continue;
+            if ((double)(digits + ambig) / t.Length < 0.7) continue;
+
+            var sb = new StringBuilder(t.Length);
+            foreach (var ch in t)
+            {
+                sb.Append(ch switch
+                {
+                    'O' or 'o' => '0',
+                    'l' or 'I' or '|' => '1',
+                    'S' => '5',
+                    'B' => '8',
+                    'Z' => '2',
+                    _ => ch,
+                });
+            }
+            tokens[i] = sb.ToString();
+            changed = true;
+        }
+
+        return changed ? string.Join(' ', tokens) : line;
+    }
+
+    private static bool IsAmbiguousChar(char ch) => ch switch
+    {
+        'O' or 'o' or 'l' or 'I' or '|' or 'S' or 'B' or 'Z' => true,
+        _ => false,
+    };
 
     private static int? ParseScu(Match match)
     {

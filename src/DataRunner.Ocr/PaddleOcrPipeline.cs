@@ -75,7 +75,7 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
             {
                 ct.ThrowIfCancellationRequested();
                 var topResult = _ocr.Run(topBand);
-                var topRaw = topResult.Text ?? string.Empty;
+                var topRaw = RegionLayout.JoinByRows(topResult.Regions);
                 if (topResult.Regions.Length > 0)
                     confidences.AddRange(topResult.Regions.Select(r => (double)r.Score));
 
@@ -90,7 +90,7 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
                 using var leftHeader = ImagePreprocessor.ExtractLeftPanelHeader(src);
                 ct.ThrowIfCancellationRequested();
                 var leftResult = _ocr.Run(leftHeader);
-                var leftRaw = leftResult.Text ?? string.Empty;
+                var leftRaw = RegionLayout.JoinByRows(leftResult.Regions);
                 if (leftResult.Regions.Length > 0)
                     confidences.AddRange(leftResult.Regions.Select(r => (double)r.Score));
 
@@ -103,10 +103,48 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
             using (var preprocessed = ImagePreprocessor.Enhance(src, upscale: true, cropRightPanel: true))
             {
                 ct.ThrowIfCancellationRequested();
+
+                // ROW SEGMENTATION DISABLED.
+                //
+                // We tried two approaches to split the right panel into one Mat
+                // per commodity card before OCR:
+                //   1. Density-based gap detection (Otsu binarize + count bright
+                //      pixels per row + threshold).
+                //   2. Luminance-based gap detection (per-row grayscale mean +
+                //      adaptive threshold on dynamic range).
+                //
+                // Both proved fragile on real SC screenshots: the panel has a
+                // gradient background, varying icon brightness per row, and
+                // intra-card sub-rows that look like inter-card gaps to either
+                // signal. We end up either with 0 bands (silent fallback) or —
+                // worse — a small number of HUGE bands that cover the wrong
+                // pixels, which makes Paddle's detector miss most of the text.
+                //
+                // Single-pass OCR on the full preprocessed right panel returns
+                // the right text consistently (the user's three reference
+                // screenshots all extract their 3-4 commodities cleanly). The
+                // remaining status-detection issues we observed (eg. "MAX. " /
+                // "NAX " misreads on Daekens) were genuinely OCR errors and
+                // are now absorbed by the tolerant status regex in
+                // CommodityParser.StatusPatterns.
+                //
+                // Keeping the band-barrier handling in CommodityParser as a
+                // no-op for the single-pass case (no "--- ROW i ---" markers
+                // are emitted), so we can re-enable per-band OCR later (eg.
+                // after fine-tuning the recognizer) by re-introducing the
+                // band-loop here, with no changes to the parser.
                 var ocrResult = _ocr.Run(preprocessed);
-                rightRaw = ocrResult.Text ?? string.Empty;
                 if (ocrResult.Regions.Length > 0)
+                {
                     confidences.AddRange(ocrResult.Regions.Select(r => (double)r.Score));
+                }
+                rightRaw = RegionLayout.JoinByRows(ocrResult.Regions);
+                _logger.LogInformation(
+                    "Right-panel OCR ({W}x{H}, {Regions} regions): {Text}",
+                    preprocessed.Width, preprocessed.Height,
+                    ocrResult.Regions.Length,
+                    rightRaw.Replace("\n", " | "));
+
                 combinedText.AppendLine("--- RIGHT PANEL PASS ---").AppendLine(rightRaw);
             }
         }

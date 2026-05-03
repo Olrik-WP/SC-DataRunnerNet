@@ -62,7 +62,7 @@ public sealed partial class OcrCoordinator : ObservableObject
         var item = new InboxItem
         {
             ImagePath = imagePath,
-            DisplayName = Path.GetFileName(imagePath),
+            DisplayName = InboxItem.FormatDisplayName(imagePath),
             Status = InboxStatus.Processing,
             StatusReason = "Waiting for OCR…",
             AddedAt = DateTimeOffset.Now,

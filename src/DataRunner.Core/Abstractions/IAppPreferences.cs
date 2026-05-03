@@ -33,6 +33,21 @@ public interface IAppPreferences
     /// </summary>
     bool DeleteScreenshotAfterSubmit { get; set; }
 
+    /// <summary>
+    /// Default value for the `is_production` flag of every new submission.
+    /// When true, submissions go LIVE on UEX (prices update for everyone).
+    /// When false, UEX treats them as TEST (recorded but not live).
+    ///
+    /// Centralized here so the user picks their mode ONCE in Settings instead
+    /// of being asked at every screenshot — which is both noisy and dangerous
+    /// (a hurried user can flip it on without thinking).
+    ///
+    /// Default: true. The whole point of running this tool IS contributing
+    /// live price data to UEX; users who specifically want to test their
+    /// setup can flip it off in Settings.
+    /// </summary>
+    bool DefaultIsProduction { get; set; }
+
     /// <summary>Persists the current state to disk.</summary>
     Task SaveAsync(CancellationToken ct = default);
 

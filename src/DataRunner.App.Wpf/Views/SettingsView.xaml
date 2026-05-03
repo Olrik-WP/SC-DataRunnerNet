@@ -208,6 +208,12 @@
                               Content="Delete screenshot file after successful submission" />
                     <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="11" Margin="22,0,0,0"
                                Text="When enabled, the .png file is removed from the watched folder once the submission is accepted by UEX. The submission itself (terminal, prices, screenshot name, request/response) is always kept in the local History (SQLite) for audit. Failed and test (is_production=0) submissions never delete the file." />
+
+                    <CheckBox Margin="0,16,0,4"
+                              IsChecked="{Binding DefaultIsProduction, Mode=TwoWay}"
+                              Content="Send submissions in PRODUCTION mode (is_production = 1)" />
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" FontSize="11" Margin="22,0,0,0"
+                               Text="When enabled (default), submissions go LIVE on UEX and update prices for everyone — this is the normal datarunner mode. Disable to send everything as TEST instead (recorded by UEX but not live), useful for debugging or when you're not sure of your data." />
                 </StackPanel>
             </ui:Card>
 

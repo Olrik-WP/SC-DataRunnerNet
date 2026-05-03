@@ -78,7 +78,8 @@ public sealed class FuzzyMatcher
             foreach (var (field, value) in candidates)
             {
                 if (string.IsNullOrWhiteSpace(value)) continue;
-                var score = Fuzz.WeightedRatio(token, Normalize(value));
+                var normValue = Normalize(value);
+                var score = ScoreCommodityCandidate(token, normValue);
                 if (best is null || score > best.Score)
                 {
                     best = new CommodityMatch(c, score, field, raw);
@@ -87,6 +88,39 @@ public sealed class FuzzyMatcher
         }
 
         return best is not null && best.Score >= effectiveMinScore ? best : null;
+    }
+
+    /// <summary>
+    /// Computes a length-aware score between an OCR token and a catalog candidate.
+    ///
+    /// The default <see cref="Fuzz.WeightedRatio"/> includes a partial-substring
+    /// bonus, which causes long OCR tokens to spuriously match short catalog names
+    /// (eg. OCR "STINS" -> catalog "TIN" scores 90% because "TIN" is a substring of
+    /// "STIN(S)"). We compensate by penalizing matches where the candidate is much
+    /// shorter or much longer than the OCR token.
+    ///
+    /// Penalty curve: lengthRatio = min(len) / max(len).
+    ///   lengthRatio &gt;= 0.75  -> no penalty (score kept as-is).
+    ///   lengthRatio &lt;  0.75  -> score multiplied by lengthRatio (linear decay).
+    ///
+    /// Examples:
+    ///   "STINS" (5) vs "STIMS" (5): ratio=1.0 -> no penalty. Score ~85 stays 85.
+    ///   "STINS" (5) vs "TIN"   (3): ratio=0.6 -> 90 * 0.6 = 54. STIMS wins.
+    ///   "BIOPLASTIC" (10) vs "BIOPLASTIC" (10): ratio=1.0, score=100.
+    ///   "BIOPLASTIC" (10) vs "BIO" (3): ratio=0.3 -> 100 * 0.3 = 30, rejected.
+    /// </summary>
+    private static int ScoreCommodityCandidate(string token, string candidate)
+    {
+        var raw = Fuzz.WeightedRatio(token, candidate);
+
+        var minLen = Math.Min(token.Length, candidate.Length);
+        var maxLen = Math.Max(token.Length, candidate.Length);
+        if (maxLen == 0) return 0;
+
+        var lengthRatio = (double)minLen / maxLen;
+        if (lengthRatio >= 0.75) return raw;
+
+        return (int)Math.Round(raw * lengthRatio);
     }
 
     /// <summary>

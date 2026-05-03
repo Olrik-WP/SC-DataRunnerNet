@@ -19,6 +19,7 @@ public sealed class JsonAppPreferences : IAppPreferences
     public bool AttachScreenshotOnSubmit { get; set; } = true;
     public string? ScreenshotsFolder { get; set; }
     public bool DeleteScreenshotAfterSubmit { get; set; } = true;
+    public bool DefaultIsProduction { get; set; } = true;
 
     public JsonAppPreferences(string? overridePath = null)
     {
@@ -39,6 +40,7 @@ public sealed class JsonAppPreferences : IAppPreferences
             AttachScreenshotOnSubmit = dto.AttachScreenshotOnSubmit;
             ScreenshotsFolder = dto.ScreenshotsFolder;
             DeleteScreenshotAfterSubmit = dto.DeleteScreenshotAfterSubmit;
+            DefaultIsProduction = dto.DefaultIsProduction;
         }
         catch
         {
@@ -61,6 +63,7 @@ public sealed class JsonAppPreferences : IAppPreferences
                 AttachScreenshotOnSubmit = AttachScreenshotOnSubmit,
                 ScreenshotsFolder = ScreenshotsFolder,
                 DeleteScreenshotAfterSubmit = DeleteScreenshotAfterSubmit,
+                DefaultIsProduction = DefaultIsProduction,
             };
             var json = JsonSerializer.Serialize(dto, JsonOpts);
             await File.WriteAllTextAsync(_filePath, json, ct).ConfigureAwait(false);
@@ -89,5 +92,6 @@ public sealed class JsonAppPreferences : IAppPreferences
         public bool AttachScreenshotOnSubmit { get; set; } = true;
         public string? ScreenshotsFolder { get; set; }
         public bool DeleteScreenshotAfterSubmit { get; set; } = true;
+        public bool DefaultIsProduction { get; set; } = true;
     }
 }

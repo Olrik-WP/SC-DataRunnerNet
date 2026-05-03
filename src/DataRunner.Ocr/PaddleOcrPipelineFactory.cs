@@ -54,6 +54,22 @@ public sealed class PaddleOcrPipelineFactory : IOcrPipelineFactory, IAsyncDispos
             _logger.LogInformation("Downloading / loading PaddleOCR English V4 models...");
             var model = await OnlineFullModels.EnglishV4.DownloadAsync(ct).ConfigureAwait(false);
 
+            // OpenBLAS backend = stable across variable input shapes.
+            //
+            // We tried PaddleDevice.Mkldnn() for a +30-50% CPU speedup but it crashed
+            // with "PaddlePredictor(Detector) run failed" starting at the second
+            // screenshot. Root cause: MKLDNN caches inference primitives PER input
+            // shape; our pipeline runs three passes per screenshot (top banner / left
+            // header / right panel) at three different aspect ratios, and the source
+            // images themselves can vary (1920x1080, 2560x1440, 3840x2160...). The
+            // cache evicts/corrupts and the next inference fails.
+            //
+            // Upstream issue: https://github.com/PaddlePaddle/Paddle/issues/22778
+            // Workarounds explored: cacheCapacity: 0 (disables cache, still flaky);
+            // PaddleDevice.Onnx() (separate runtime, may be a stable+fast alternative
+            // to revisit later if perf becomes a bottleneck).
+            //
+            // For now: stability > speed. OpenBLAS works on every x64 CPU.
             var ocr = new PaddleOcrAll(model)
             {
                 AllowRotateDetection = false,

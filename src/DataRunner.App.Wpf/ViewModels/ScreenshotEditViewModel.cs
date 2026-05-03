@@ -84,10 +84,21 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     [ObservableProperty] private int _errorCount;
     [ObservableProperty] private int _warningCount;
 
-    /// <summary>True when at least one validation Error is present. Disables Send.</summary>
+    /// <summary>True when at least one validation Error is present. Disables Send
+    /// unless <see cref="UserOverrideValidation"/> is also true.</summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
     private bool _hasBlockingErrors;
+
+    /// <summary>
+    /// Manual override the user can tick when blocking errors are present to
+    /// confirm "I have reviewed every value myself, send it anyway". Reset to
+    /// false on every <see cref="Load"/> so the safety net stays active by
+    /// default for each new screenshot.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
+    private bool _userOverrideValidation;
 
     /// <summary>Concise summary line for the footer (e.g. "2 errors · 1 warning").</summary>
     [ObservableProperty] private string _validationSummary = "";
@@ -281,6 +292,12 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
                 continue;
             }
 
+            // Strict blocking thresholds. The user can still bypass them by
+            // explicitly ticking the "I have reviewed everything" override
+            // checkbox in the validation footer (gated by UserOverrideValidation).
+            //   < 85  -> Error (blocking unless override)
+            //   85-99 -> Warning (non-blocking, prompt verification)
+            //   100   -> silent
             if (r.MatchScore > 0 && r.MatchScore < 85)
             {
                 ValidationIssues.Add(new LiveValidationIssue
@@ -293,8 +310,6 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
             }
             else if (r.MatchScore > 0 && r.MatchScore < 100)
             {
-                // Even 98% can be a wrong commodity (e.g. "Stims" → "Tins").
-                // We don't block but we ALWAYS warn so the user double-checks.
                 ValidationIssues.Add(new LiveValidationIssue
                 {
                     Severity = LiveValidationSeverity.Warning,
@@ -355,17 +370,28 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         };
     }
 
-    private bool CanSubmit() => !HasBlockingErrors;
+    /// <summary>
+    /// Send is enabled when there are no blocking errors OR when the user has
+    /// explicitly ticked the override checkbox to bypass the safety net.
+    /// The override is per-screenshot and resets on every <see cref="Load"/>.
+    /// </summary>
+    private bool CanSubmit() => !HasBlockingErrors || UserOverrideValidation;
 
     public void Load(InboxItem item)
     {
         _bound = item;
         CanReRunOcr = true;
-        // Each load resets the explicit-confirmation flag: the OCR's pre-pick
+        // Each load resets the explicit-confirmation flags: the OCR's pre-pick
         // is a guess, not a commitment from the user. They must still confirm
         // (even if just by clicking the same terminal in the dropdown) when
-        // the terminal name is ambiguous.
+        // the terminal name is ambiguous, and re-tick the override to bypass
+        // any blocking validation errors on this new screenshot.
         UserExplicitlyConfirmedTerminal = false;
+        UserOverrideValidation = false;
+        // The production mode is a global preference now (Settings) — re-read
+        // it on every load so the editor reflects the current global value
+        // and the confirm dialog displays the right mode badge.
+        IsProduction = _prefs.DefaultIsProduction;
         SourceImagePath = item.ImagePath;
         try
         {
@@ -550,8 +576,15 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
             return;
         }
 
+        // The dialog only DISPLAYS the production mode now (badge in the footer);
+        // the toggle has moved to Settings to remove the per-screenshot footgun.
+        // Pre-seed it from the live preference so the user sees the actual mode
+        // their next click will commit in.
         var confirmVm = new ConfirmSubmitViewModel(payload, validation, dup,
-            UexApiClient.SerialiseWirePayload(payload));
+            UexApiClient.SerialiseWirePayload(payload))
+        {
+            IsProduction = _prefs.DefaultIsProduction,
+        };
 
         var confirmed = await _dialog.ShowConfirmSubmitAsync(confirmVm);
         if (!confirmed) return;
@@ -858,17 +891,18 @@ public sealed partial class EditableRow : ObservableObject
     /// <summary>True if no commodity has been picked yet.</summary>
     public bool CommodityIsMissing => Commodity is null;
 
+    /// <summary>True when the inventory status was not detected by OCR. Drives
+    /// the orange tint on the Status combobox so the user notices they need
+    /// to pick one.</summary>
+    public bool StatusIsUnknown => Status == InventoryStatus.Unknown;
+
     /// <summary>
-    /// Severity bucket for the match score, returned as a string compatible with
-    /// the existing <c>SeverityToBrushConverter</c>:
-    ///   ≥ 95 → "Ok"     (green)
-    ///   80-94 → "Warning" (orange)
-    ///   &lt; 80  → "Error"   (red)
-    /// </summary>
-    /// <summary>
-    /// Severity for the match badge. Only a perfect 100 is "Ok" (green) —
-    /// because even 98% can be a wrong commodity (e.g. "Stims" → "Tins").
-    /// Anything &lt; 100 needs a visual cue to prompt user verification.
+    /// Severity for the match badge, kept in sync with the validation thresholds
+    /// in <see cref="ScreenshotEditViewModel.RecomputeValidation"/>:
+    ///   100   → "Ok"       (green)
+    ///   85-99 → "Warning"  (orange, non-blocking)
+    ///   &lt; 85  → "Error"    (red, blocking unless the user explicitly ticks
+    ///                       "I have reviewed everything" in the footer).
     /// </summary>
     public string MatchSeverity => MatchScore switch
     {
@@ -883,5 +917,6 @@ public sealed partial class EditableRow : ObservableObject
     partial void OnCommodityChanged(UexCommodity? value) => OnPropertyChanged(nameof(CommodityIsMissing));
     partial void OnScuValueChanged(int? value) => OnPropertyChanged(nameof(ScuIsEmpty));
     partial void OnPriceValueChanged(double? value) => OnPropertyChanged(nameof(PriceIsEmpty));
+    partial void OnStatusChanged(InventoryStatus value) => OnPropertyChanged(nameof(StatusIsUnknown));
     partial void OnMatchScoreChanged(double value) => OnPropertyChanged(nameof(MatchSeverity));
 }

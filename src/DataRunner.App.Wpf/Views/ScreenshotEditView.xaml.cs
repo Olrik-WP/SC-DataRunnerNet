@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using DataRunner.App.ViewModels;
 using DataRunner.Core.Models;
@@ -28,7 +27,14 @@ public partial class ScreenshotEditView : UserControl
         }
     }
 
-    private void PreviewImage_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    /// <summary>
+    /// Opens the source screenshot in a full-screen viewer with zoom and pan.
+    /// We deliberately do NOT show the screenshot inline anywhere in the editor:
+    /// the inline preview was eating ~40% of the editor width while the actual
+    /// image was tiny, so it was pure noise. The viewer is a separate window
+    /// that the user opens on demand when they need to verify what the OCR saw.
+    /// </summary>
+    private void ShowScreenshot_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not ScreenshotEditViewModel vm || vm.PreviewImage is not BitmapImage img)
             return;

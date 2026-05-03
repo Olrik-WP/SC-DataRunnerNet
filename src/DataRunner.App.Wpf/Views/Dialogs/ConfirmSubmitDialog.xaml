@@ -41,25 +41,32 @@
 
                     <ui:Card Padding="16,12" Margin="0,0,0,10">
                         <StackPanel>
-                            <TextBlock Text="Validation issues"
-                                       FontWeight="SemiBold" Margin="0,0,0,8" />
-                            <ItemsControl ItemsSource="{Binding Issues}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <DockPanel Margin="0,2">
-                                            <Border Width="6" Margin="0,3,8,3"
-                                                    Background="{Binding Severity, Converter={StaticResource SeverityToBrush}}" />
-                                            <StackPanel>
-                                                <TextBlock FontSize="12">
-                                                    <Run Text="[" /><Run Text="{Binding Severity}" /><Run Text="] " /><Run Text="{Binding Code}" />
-                                                </TextBlock>
-                                                <TextBlock Text="{Binding Message}" TextWrapping="Wrap"
-                                                           Opacity="0.85" FontSize="12" />
-                                            </StackPanel>
-                                        </DockPanel>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+                            <DockPanel Margin="0,0,0,8">
+                                <TextBlock DockPanel.Dock="Left" Text="Validation issues"
+                                           FontWeight="SemiBold" />
+                                <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                           FontSize="11" Opacity="0.55"
+                                           Text="{Binding Issues.Count, StringFormat='{}{0} issue(s)'}" />
+                            </DockPanel>
+                            <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Issues}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel Margin="0,2">
+                                                <Border Width="6" Margin="0,3,8,3"
+                                                        Background="{Binding Severity, Converter={StaticResource SeverityToBrush}}" />
+                                                <StackPanel>
+                                                    <TextBlock FontSize="12">
+                                                        <Run Text="[" /><Run Text="{Binding Severity}" /><Run Text="] " /><Run Text="{Binding Code}" />
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding Message}" TextWrapping="Wrap"
+                                                               Opacity="0.85" FontSize="12" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
                             <TextBlock Margin="0,4,0,0" Opacity="0.6" FontSize="11"
                                        Text="No issues" Visibility="{Binding Issues.Count, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
                         </StackPanel>
@@ -67,30 +74,43 @@
 
                     <ui:Card Padding="16,12">
                         <StackPanel>
-                            <TextBlock Text="Live diff vs UEX (commodities_raw_prices)"
-                                       FontWeight="SemiBold" Margin="0,0,0,8" />
-                            <ItemsControl ItemsSource="{Binding Findings}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <DockPanel Margin="0,3">
-                                            <Border Width="6" Margin="0,3,8,3"
-                                                    Background="{Binding Severity, Converter={StaticResource SeverityToBrush}}" />
-                                            <StackPanel>
-                                                <TextBlock FontSize="12">
-                                                    <Run Text="[" /><Run Text="{Binding Severity}" /><Run Text="] " /><Run Text="{Binding CommodityLabel}" />
-                                                </TextBlock>
-                                                <TextBlock Text="{Binding Reason}" TextWrapping="Wrap"
-                                                           Opacity="0.85" FontSize="12" />
-                                                <TextBlock Opacity="0.55" FontSize="11">
-                                                    <Run Text="local " /><Run Text="{Binding LocalValue, StringFormat='F2'}" />
-                                                    <Run Text="  ·  remote " /><Run Text="{Binding RemoteValue, StringFormat='F2'}" />
-                                                    <Run Text="  ·  diff " /><Run Text="{Binding PercentDifference, StringFormat='P1'}" />
-                                                </TextBlock>
-                                            </StackPanel>
-                                        </DockPanel>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+                            <DockPanel Margin="0,0,0,8">
+                                <TextBlock DockPanel.Dock="Left"
+                                           Text="Live diff vs UEX (commodities_raw_prices)"
+                                           FontWeight="SemiBold" />
+                                <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                           FontSize="11" Opacity="0.55"
+                                           Text="{Binding Findings.Count, StringFormat='{}{0} finding(s)'}" />
+                            </DockPanel>
+                            <!-- Internal MaxHeight + ScrollViewer prevents a long
+                                 list of findings from pushing the bottom checkboxes
+                                 + Send button off screen. The outer column also
+                                 scrolls; this just stops THIS card from being the
+                                 entire body. -->
+                            <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Findings}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel Margin="0,3">
+                                                <Border Width="6" Margin="0,3,8,3"
+                                                        Background="{Binding Severity, Converter={StaticResource SeverityToBrush}}" />
+                                                <StackPanel>
+                                                    <TextBlock FontSize="12">
+                                                        <Run Text="[" /><Run Text="{Binding Severity}" /><Run Text="] " /><Run Text="{Binding CommodityLabel}" />
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding Reason}" TextWrapping="Wrap"
+                                                               Opacity="0.85" FontSize="12" />
+                                                    <TextBlock Opacity="0.55" FontSize="11">
+                                                        <Run Text="local " /><Run Text="{Binding LocalValue, StringFormat='F2'}" />
+                                                        <Run Text="  ·  remote " /><Run Text="{Binding RemoteValue, StringFormat='F2'}" />
+                                                        <Run Text="  ·  diff " /><Run Text="{Binding PercentDifference, StringFormat='P1'}" />
+                                                    </TextBlock>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
                             <TextBlock Margin="0,4,0,0" Opacity="0.6" FontSize="11"
                                        Text="No live diff (probably new data)"
                                        Visibility="{Binding Findings.Count, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
@@ -134,10 +154,24 @@
                               ToolTip="The validator may be wrong (e.g. a previous attempt failed but was logged locally). Use this to force-send anyway and let UEX decide."
                               Content="Override BLOCK and send anyway (UEX will be the final judge)"
                               Visibility="{Binding HasBlockingIssues, Converter={StaticResource BoolToVisibility}}" />
-                    <CheckBox IsChecked="{Binding IsProduction}"
-                              Margin="0,4,0,0"
-                              Foreground="IndianRed"
-                              Content="is_production = 1 (commit live, otherwise UEX treats as test)" />
+                    <!-- Mode badge (TEST / PRODUCTION). Read-only here; the toggle
+                         lives in Settings to prevent accidental per-screenshot flipping. -->
+                    <Border Margin="0,8,0,0" Padding="8,3" CornerRadius="3"
+                            HorizontalAlignment="Left">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#22DAA520" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsProduction}" Value="True">
+                                        <Setter Property="Background" Value="#33C8504F" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock FontSize="11" FontWeight="SemiBold">
+                            <Run Text="Mode: " /><Run Text="{Binding ModeLabel, Mode=OneWay}" />
+                        </TextBlock>
+                    </Border>
                 </StackPanel>
 
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">

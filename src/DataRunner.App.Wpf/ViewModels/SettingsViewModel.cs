@@ -33,6 +33,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _catalogStatus = "loading...";
     [ObservableProperty] private bool _attachScreenshotOnSubmit = true;
     [ObservableProperty] private bool _deleteScreenshotAfterSubmit = true;
+    [ObservableProperty] private bool _defaultIsProduction;
     [ObservableProperty] private string _screenshotsFolderStatus = "";
     [ObservableProperty] private bool _screenshotsFolderHasError;
 
@@ -68,6 +69,13 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (_isHydrating) return;
         _prefs.DeleteScreenshotAfterSubmit = value;
         _ = SavePrefsAsync("delete-screenshot-after-submit");
+    }
+
+    partial void OnDefaultIsProductionChanged(bool value)
+    {
+        if (_isHydrating) return;
+        _prefs.DefaultIsProduction = value;
+        _ = SavePrefsAsync("default-is-production");
     }
 
     partial void OnScreenshotsFolderChanged(string value)
@@ -142,6 +150,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             AttachScreenshotOnSubmit = _prefs.AttachScreenshotOnSubmit;
             DeleteScreenshotAfterSubmit = _prefs.DeleteScreenshotAfterSubmit;
+            DefaultIsProduction = _prefs.DefaultIsProduction;
             ScreenshotsFolder = _prefs.ScreenshotsFolder ?? DefaultScreenshotsFolder();
             UpdateScreenshotsFolderStatus(ScreenshotsFolder);
             _logger.LogInformation(
