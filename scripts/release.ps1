@@ -186,12 +186,23 @@ $tagName = "v$newVersion"
 
 if ($Mode -eq 'ci') {
     if ($dirty) {
-        Warn "Working tree has uncommitted changes. They will be committed together with the version bump."
-        if (-not (AskYesNo 'Continue?')) { exit 0 }
+        # Strict mode for the CI flow: the user's expected workflow is to
+        # commit + push their code via Cursor BEFORE running this script.
+        # Releasing on top of a dirty tree would silently leave their work
+        # out of the tagged commit and ship a half-baked binary. So we bail
+        # with a clear message instead of trying to be clever.
+        Warn 'Working tree is DIRTY (uncommitted changes detected):'
+        & git status --short
+        Write-Host ''
+        Fail "Please commit and push your changes first (use the git panel in Cursor), then re-run this script. The script's job is to bump the version, tag, and trigger CI — your feature commits stay your responsibility."
     }
     $existingTag = & git tag --list $tagName
     if ($existingTag) {
         Fail "Tag $tagName already exists locally. Aborting (delete it with 'git tag -d $tagName' if you really want to re-tag)."
+    }
+    if ($ahead -ne '0' -and $ahead -ne '0 (no upstream)') {
+        Warn "You have $ahead local commit(s) not yet on origin/$branch. The script will push them along with the version bump."
+        if (-not (AskYesNo 'Continue?' $true)) { exit 0 }
     }
 }
 
@@ -204,16 +215,16 @@ H1 'Plan'
 switch ($Mode) {
     'ci' {
         Write-Host "  [x] Update <Version> in Directory.Build.props ($currentVersion -> $newVersion)"
-        if ($dirty -or $Bump -ne 'none') {
-            Write-Host "  [x] git add Directory.Build.props (and any other staged change)"
-            Write-Host "  [x] git commit -m 'Release v$newVersion'"
+        if ($Bump -ne 'none') {
+            Write-Host "  [x] git add Directory.Build.props"
+            Write-Host "  [x] git commit -m 'Release v$newVersion'   (only the version bump)"
         }
         Write-Host "  [x] git push origin $branch"
         Write-Host "  [x] git tag $tagName"
         Write-Host "  [x] git push origin $tagName    ← TRIGGERS GitHub Actions"
         Write-Host ""
-        Write-Host "  After the tag push, GitHub Actions will:" -ForegroundColor DarkGray
-        Write-Host "    - dotnet publish self-contained ($Runtime)" -ForegroundColor DarkGray
+        Write-Host "  After the tag push, GitHub Actions runs the YAML workflow and:" -ForegroundColor DarkGray
+        Write-Host "    - dotnet publish self-contained ($Runtime)   (build happens THERE, not on your machine)" -ForegroundColor DarkGray
         Write-Host "    - vpk download (previous release, for delta)" -ForegroundColor DarkGray
         Write-Host "    - vpk pack v$newVersion" -ForegroundColor DarkGray
         Write-Host "    - vpk upload github (creates the public release)" -ForegroundColor DarkGray
