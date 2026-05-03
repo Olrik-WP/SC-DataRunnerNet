@@ -314,6 +314,23 @@ if (-not $vpkInstalled) {
     if ($LASTEXITCODE -ne 0) { Fail 'Failed to install vpk.' }
 }
 
+# `dotnet tool install -g` writes into ~/.dotnet/tools, but on a brand-new
+# install Windows does NOT refresh PATH for the running process. Without
+# this fix, the very first run of the script (right after installing vpk)
+# fails with "vpk is not recognized" — the user has to re-launch.
+# Append the tools dir to the session PATH so subsequent calls resolve.
+$dotnetTools = Join-Path $env:USERPROFILE '.dotnet\tools'
+if ((Test-Path $dotnetTools) -and (";$env:PATH;" -notlike "*;$dotnetTools;*")) {
+    $env:PATH = "$env:PATH;$dotnetTools"
+    Info "Added '$dotnetTools' to PATH for this session."
+}
+
+# Sanity-check that vpk is now on PATH; if not, point the user at the
+# remediation rather than failing two steps later with a confusing error.
+if (-not (Get-Command vpk -ErrorAction SilentlyContinue)) {
+    Fail "vpk was installed but is still not on PATH. Open a NEW terminal and re-run the script (or manually run: `$env:PATH += ';$dotnetTools')."
+}
+
 Step 'Downloading previous release for delta packing (best-effort)'
 $dlArgs = @('download','github','--repoUrl',$RepoUrl,'-o',$releasesDir,'--channel',$ReleaseChannel)
 if ($env:GH_TOKEN) { $dlArgs += @('--token',$env:GH_TOKEN) }
