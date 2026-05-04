@@ -2,10 +2,11 @@
 
 > An open-source Star Citizen commodity terminal scanner that submits trade
 > data to [UEX Corp](https://uexcorp.space) — fast OCR, manual review, one
-> click. Built in .NET 9 / WPF, ships with a single Windows installer that
-> auto-updates itself.
+> click. Built in .NET 9 / WPF, ships as a single Windows installer that
+> auto-updates itself silently.
 
 [![Release](https://img.shields.io/github/v/release/Olrik-WP/SC-DataRunnerNet?label=release&color=2EA043)](https://github.com/Olrik-WP/SC-DataRunnerNet/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Olrik-WP/SC-DataRunnerNet/total?label=downloads&color=2EA043)](https://github.com/Olrik-WP/SC-DataRunnerNet/releases)
 [![CI](https://github.com/Olrik-WP/SC-DataRunnerNet/actions/workflows/release.yml/badge.svg)](https://github.com/Olrik-WP/SC-DataRunnerNet/actions/workflows/release.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/9.0)
@@ -21,11 +22,21 @@ UEX Corp where the entire SC trading community benefits from up-to-date
 prices.
 
 ```
-[F12 in-game]            [SC-DataRunner picks it up]         [you click Send]
+[Print Screen in SC]      [SC-DataRunner picks it up]         [you click Send]
         ↓                          ↓                                ↓
 ScreenShot-2026-...   →   Inbox card · OCR pipeline    →     UEX /data_submit
                           (~2-30s on CPU)                     (LIVE prices)
 ```
+
+> ℹ️ In Star Citizen the screenshot key is **Print Screen** (`Impr. écran`
+> on FR keyboards), **not** F12. Files land in
+> `<SC install>\LIVE\Screenshots\` by default — that's the folder
+> SC-DataRunner watches.
+
+<!-- Add your screenshot under docs/images/hero.png, then uncomment:
+![SC-DataRunner main window](docs/images/hero.png)
+See docs/images/README.md for the full naming convention.
+-->
 
 ### Why use this over the existing tools?
 
@@ -38,22 +49,35 @@ ScreenShot-2026-...   →   Inbox card · OCR pipeline    →     UEX /data_subm
   penalty to kill the classic "Stims → Tin" false positive, status-leak
   protection, container-size union across rows, live diff vs. the current
   UEX price before submission.
+- **Stale-target view** — built-in tab that pulls `commodities_prices_all`
+  from UEX and tells you which `(terminal, commodity)` pairs are most
+  outdated, so you can plan a route that actually helps the database.
+- **Side-by-side review** — toggle a docked screenshot panel next to the
+  validation form, with click-and-drag pan and mouse-wheel zoom; great
+  on ultrawide monitors, still usable on 1080p once the inbox is collapsed.
+- **Diagnostics tab + one-click bug report** — copies your version, recent
+  log tail, last 5 submissions and prefs to the clipboard, ready to paste
+  into a GitHub issue. No screenshots of logs, no zip-and-attach.
 - **No Python runtime to install.** Single signed Windows installer, ~50 MB.
   .NET 9 runtime is bundled, you don't need to install anything else.
-- **Auto-updates** via [Velopack](https://github.com/velopack/velopack) —
-  you get every fix the same week it ships.
+- **Silent auto-updates** via [Velopack](https://github.com/velopack/velopack) —
+  every fix lands in your build the same week it ships, with a discreet
+  pill in the status bar so you stay in control of when to apply it.
 - **Privacy-first**: OCR runs entirely on your machine, the screenshot file
-  is only attached to a UEX submission AFTER you click Send.
+  is only attached to a UEX submission AFTER you click Send (and you can
+  disable that attachment in Settings).
 
-### What it doesn't do (yet)
+---
 
-- Linux / macOS support — it's WPF so today the binary is Windows-only.
-  Platform-specific bits live in `DpapiSecretKeyStore` and could be
-  swapped behind the existing `ISecretKeyStore` interface for a Mono /
-  Avalonia port. PRs welcome.
-- In-game capture — for now it watches your `Screenshots` folder. You
-  press F12 in SC, the watcher picks the file up. Native screen capture
-  via `Windows.Graphics.Capture` is on the roadmap.
+## System requirements
+
+- **Windows 10 21H2** or newer (Windows 11 recommended for Mica titlebar).
+- **~250 MB free disk** (~50 MB installer + ~150 MB OCR models downloaded
+  on first OCR run + a few MB of cache & history).
+- **No GPU required.** OCR runs on CPU; ~2-30 s per screenshot depending
+  on your CPU. An NVIDIA GPU edition is on the roadmap.
+- **Star Citizen LIVE** screenshots in PNG or JPG (the in-game default).
+- A **UEX user secret-key** ([uexcorp.space → Account → Secret Key](https://uexcorp.space/account/home)).
 
 ---
 
@@ -68,7 +92,7 @@ ScreenShot-2026-...   →   Inbox card · OCR pipeline    →     UEX /data_subm
    - paste your **UEX user secret-key** (from
      [uexcorp.space → Account → Secret Key](https://uexcorp.space/account/home))
    - point to your SC `Screenshots` folder (the wizard pre-fills the standard
-     location)
+     location, including `D:\Jeux\StarCitizen\LIVE\Screenshots` and friends)
    - that's it — auto-update is on by default.
 
 You do **NOT** need to register your own UEX application. The official build
@@ -94,9 +118,45 @@ Without that property, the wizard adds a 4th step to ask the user for their
 own UEX app token (`Settings → App bearer token (advanced)` lets them
 override at any time).
 
+### Uninstall / reset
+
+- **Uninstall the app**: `Settings → Apps → SC-DataRunner → Uninstall`
+  (standard Windows uninstaller — it removes the binaries but **keeps your
+  data**).
+- **Wipe local data too** (history DB, prefs, cached catalog, encrypted
+  secret-key, logs): delete the folder
+  `%LOCALAPPDATA%\SC-DataRunnerNet\`.
+- **Revoke API access on UEX** if you're done with it: regenerate your
+  secret-key from [uexcorp.space → Account](https://uexcorp.space/account/home).
+
+---
+
+## Your first upload (60-second tour)
+
+1. Take a screenshot of any commodity terminal in Star Citizen with
+   **Print Screen** (`Impr. écran`).
+2. Alt-tab to SC-DataRunner — the new file pops in the **Inbox** within a
+   second, OCR runs (~2-30 s), the card turns green when ready.
+3. Click the card. The validation editor opens. Cross-check SCU / price /
+   status against the screenshot — toggle **Side-by-side** if you want
+   the image docked next to the form.
+4. Fix any orange/red row (orange = warning, red = blocking; the override
+   checkbox lets you ship anyway after manual review).
+5. Click **Send**. The confirmation dialog shows the live diff vs UEX
+   prices and the exact JSON about to be POSTed. Confirm → done.
+6. The card moves to **History**, the screenshot is auto-deleted (if
+   that preference is on), and your submission counts toward UEX
+   datarunner stats.
+
+> 💡 **Tip**: open the **Targets** tab first to see which terminals are
+> the most stale — you'll farm the most useful submissions in the same
+> trip.
+
 ---
 
 ## How it works (quick tour for contributors)
+
+### Pipeline
 
 ```
 ┌─────────────────────────┐
@@ -111,15 +171,18 @@ override at any time).
 │ PaddleOcrPipeline       │  3 passes: top banner / left header / right panel
 │ + ImagePreprocessor     │  CLAHE + ×2 upscale + horizontal-region grouping
 │ + RegionLayout          │  reconstruct 2-D layout from per-region bboxes
-└────────────┬────────────┘
+│ + aggressive retry      │  re-OCR with stronger preprocessing if a terminal
+└────────────┬────────────┘  name or status came back empty
              ↓
 ┌─────────────────────────┐
 │ CommodityParser         │  regex + fuzzy match against the UEX catalog,
-│ + FuzzyMatcher          │  length penalty, status barriers, container UNION
+│ + FuzzyMatcher          │  length penalty, status barriers, container UNION,
+│                         │  OutOfStock → SCU=0 fallback
 └────────────┬────────────┘
              ↓ ParsedSubmission + UexDataSubmitPayload
 ┌─────────────────────────┐
-│ ScreenshotEditViewModel │  live validation, override checkbox, manual edits
+│ ScreenshotEditViewModel │  live validation, override checkbox, manual edits,
+│ + ScreenshotPanel       │  optional side-by-side screenshot panel
 └────────────┬────────────┘
              ↓ user clicks Send
 ┌─────────────────────────┐
@@ -132,6 +195,16 @@ override at any time).
 │ + SqliteSubmissionHistory  audit log of every request/response, locally
 └─────────────────────────┘
 ```
+
+### Five tabs in the UI
+
+| Tab | What's in it |
+|---|---|
+| **Inbox** | Auto-imported screenshots, OCR status, multi-select + merge, validation editor |
+| **Targets** | Stale `(terminal, commodity)` pairs from UEX, sortable by age — plan a route |
+| **History** | Local audit log of every submission (request + response JSON) |
+| **Diagnostics** | App version, log viewer, recent submission inspector, **one-click bug report** to clipboard |
+| **Settings** | Secret key, bearer token override, screenshots folder, default mode (production/test), preferences |
 
 ### Project layout
 
@@ -166,6 +239,19 @@ commits the new `<Version>` in `Directory.Build.props`, and pushes the
 matching `v1.2.3` tag. The CI workflow does the rest — Velopack packs +
 uploads to GitHub Releases, existing users auto-update within hours.
 
+### Auto-update flow (Velopack)
+
+1. App launches → silent background `CheckForUpdatesAsync` against the
+   GitHub Releases feed.
+2. If a newer version exists, the status bar shows a small **"Update
+   available"** pill. Click it to open Settings.
+3. From Settings you choose Download → Apply. The installer streams the
+   delta, replaces the binaries on the next restart, no UAC prompt, no
+   re-installation, your data dir is preserved.
+
+You can also force a check from `Settings → Updates`. Velopack handles
+rollback if the new build fails to start.
+
 ### Bearer-token security model (important)
 
 The official CI build embeds the UEX app bearer token via
@@ -195,14 +281,20 @@ token leaks, no user data is at risk.
 
 - Terminal name recognition: ~99% on clean screenshots, with disambiguation
   for terminals that share a name across star systems (e.g. "Pyro Gateway"
-  vs. "Stanton Gateway").
+  vs. "Stanton Gateway") — confirmed by the `RichDisplayName` warning in
+  the editor.
 - Commodity name matching: ~95-99% with the length-penalty fuzzy matcher
   protecting against false positives.
 - Container sizes: 1, 2, 4, 8, 16, 24, 32 picked up with UNION across rows
   (so the smaller sizes that the OCR sometimes misses on one row are
   recovered from another).
 - Status detection (`MAX INVENTORY`, `LOW INVENTORY`, ...) tolerates the
-  most common OCR errors (M↔N, 0↔O, period inserted between words).
+  most common OCR errors (M↔N, 0↔O, period inserted between words). When
+  status is `OUT OF STOCK` and SCU isn't recognised, SCU is set to 0
+  automatically — a missing 0 is no longer a blocking error.
+- Aggressive retry pass (CLAHE clipLimit 4.0, ×3 upscale, unsharp mask)
+  re-runs whenever the first pass returned an empty terminal name or any
+  Unknown status, and merges results back without overwriting good values.
 
 ### What still needs your eye
 
@@ -215,11 +307,8 @@ token leaks, no user data is at risk.
   lets you ship anyway after manual review.
 - Numeric typography in SC is glow-heavy at 1080p; values >9 999 999
   occasionally lose a digit. Always cross-check the SCU and price against
-  the screenshot (the "Show screenshot" button opens a zoom viewer).
-
-The roadmap section below tracks the OCR improvements we've explored
-(row segmentation, MKLDNN backend, fine-tune) and why they are or aren't
-on the critical path.
+  the screenshot — toggle the **Side-by-side** screenshot panel in the
+  editor for a docked, zoomable view that stays in sync with the form.
 
 ---
 
@@ -229,24 +318,44 @@ on the critical path.
 - ✅ End-to-end OCR pipeline with manual review UI
 - ✅ DPAPI-encrypted credential storage
 - ✅ SQLite submission audit log
-- ✅ Velopack auto-update + signed installer
-- ✅ Validation footer with live diff vs UEX prices
-- ✅ Override checkbox to bypass blocking warnings after manual review
+- ✅ Velopack silent auto-update + signed installer
+- ✅ Validation footer with live diff vs UEX prices + override checkbox
 - ✅ Multi-screenshot merge (one terminal, many screenshots → one submission)
-- ✅ Built-in app token + override (this PR)
+- ✅ Built-in app token embedded at build, override possible in Settings
+- ✅ Stale-target view (Targets tab) — `commodities_prices_all` sorted by age
+- ✅ Side-by-side screenshot panel (toggle) + collapsible inbox
+- ✅ Diagnostics tab — log viewer, submission inspector, one-click bug report
+- ✅ Aggressive OCR retry pass for missing terminal names / Unknown status
+- ✅ OutOfStock → SCU=0 inference (no longer a blocking error)
+- ✅ Terminal disambiguation across star systems (e.g. Pyro vs. Stanton)
 
 ### Next
-- 🔜 Native screen capture (`Windows.Graphics.Capture`) so users can press
-  a hotkey from inside the game instead of using F12 + folder watcher.
-- 🔜 Stale-target view: pull `commodities_prices_all`, surface terminals
-  whose data is most outdated so the user knows where to go contribute.
-- 🔜 OCR fine-tuning on a SC-specific dataset (would push commodity-name
-  accuracy from ~95% to ~99%+; ~1 week of effort).
+- 🔜 Hotkey-triggered re-OCR of a single row (drag a region in the panel,
+  re-OCR only that crop with stronger preprocessing).
+- 🔜 Optional Discord webhook on successful submission, for crew-coordinated
+  routes.
+- 🔜 Persistent column layout / column visibility in the editor DataGrid.
 
 ### Maybe later
-- ⏳ Linux / macOS port (Avalonia rewrite of the WPF layer).
 - ⏳ GPU edition (PaddleOCR on CUDA) for power users with NVIDIA GPUs.
-- ⏳ Cloud sync of the submission history across multiple PCs.
+
+---
+
+## Reporting bugs
+
+Open the **Diagnostics tab → "Copy bug report"**, then paste into a new
+[GitHub issue](https://github.com/Olrik-WP/SC-DataRunnerNet/issues/new).
+The clipboard payload contains:
+
+- App version + .NET runtime + OS
+- Data folder location and DB size
+- Catalog state (commodities/terminals counts, last refresh time)
+- Non-secret preferences (your bearer/secret keys are **never** copied)
+- Last 5 submissions: terminal, HTTP status, API status, message
+- Last 50 lines of the current log file
+
+If you can attach the SC terminal screenshot that triggered the bug,
+even better — but the report alone is usually enough to reproduce.
 
 ---
 
@@ -259,15 +368,13 @@ you submit changes.
 
 Useful starting points:
 
-- Bug? Open an [issue](https://github.com/Olrik-WP/SC-DataRunnerNet/issues)
-  with a screenshot of the SC terminal + the OCR fragment shown in the
-  editor (`Right-panel OCR (...)` in the log file at
-  `%LOCALAPPDATA%\SC-DataRunnerNet\logs\app-*.log`).
 - Want to improve OCR accuracy? `src/DataRunner.Ocr/Pipeline/CommodityParser.cs`
   and `src/DataRunner.Ocr/Matching/FuzzyMatcher.cs` are where most of the
   heuristics live.
 - Want to add a new validation rule? `ScreenshotEditViewModel.RecomputeValidation`
   is the entry point.
+- Want to tweak the screenshot panel UX? `Views/ScreenshotPanel.xaml(.cs)` —
+  it powers both the side-by-side view and the standalone window.
 
 Code style: standard `dotnet format`. The CI runs it on every push.
 
@@ -282,6 +389,17 @@ In short: you can use, modify, and redistribute it freely, but if you run
 a modified version as a network service (or distribute it), you must make
 your modifications available under the same license. This is intentional:
 the SC datarunner ecosystem benefits from improvements being shared back.
+
+---
+
+## Community
+
+- 🐛 **Bug?** [Open a GitHub issue](https://github.com/Olrik-WP/SC-DataRunnerNet/issues/new)
+  with the output of `Diagnostics → Copy bug report`.
+- 💬 **UEX datarunner Discord channel** — best place to chat about
+  data-quality, terminal coverage, and trade-route planning.
+- ⭐ **Star the repo** if it helps you. It's the only way I know the tool
+  is useful to people outside my own crew.
 
 ---
 

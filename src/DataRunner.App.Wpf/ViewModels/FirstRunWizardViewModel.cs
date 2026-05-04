@@ -95,7 +95,7 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
     {
         var dlg = new Microsoft.Win32.OpenFolderDialog
         {
-            Title = "Pick the folder Star Citizen writes screenshots to (F12)",
+            Title = "Pick the folder Star Citizen writes screenshots to (Print Screen)",
             InitialDirectory = !string.IsNullOrWhiteSpace(ScreenshotsFolder) && Directory.Exists(ScreenshotsFolder)
                 ? ScreenshotsFolder
                 : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
