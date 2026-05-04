@@ -326,14 +326,39 @@ token leaks, no user data is at risk.
 - ✅ OutOfStock → SCU=0 inference (no longer a blocking error)
 - ✅ Terminal disambiguation across star systems (e.g. Pyro vs. Stanton)
 
-### Next
-- 🔜 Hotkey-triggered re-OCR of a single row (drag a region in the panel,
-  re-OCR only that crop with stronger preprocessing).
-- 🔜 Optional Discord webhook on successful submission, for crew-coordinated
-  routes.
-- 🔜 Persistent column layout / column visibility in the editor DataGrid.
+### Next — extend coverage to other UEX submission types
+
+The UEX `data_submit` endpoint actually accepts **7 categories** of pricing
+data via its `type` field. Today we only cover **commodities**. The other
+six are submission types where community coverage is much weaker — and
+they all use a similar in-game UI we could OCR with the same pipeline.
+
+| Phase | Type | In-game source | OCR effort | Why it matters |
+|---|---|---|---|---|
+| **🔜 Phase 1** | `item` | Shop terminals (Cubby Blast, Centermass, Garrity, OmegaPro, medical / food vendors, sub-gear bornes) | Low — same SCU/price layout, parser ~90 % reusable | Coverage is **catastrophic** today. Biggest single quality-of-life win for UEX. |
+| **🔜 Phase 2** | `fuel` | Refuel terminals (Quantum + Hydrogen) at any station | Low — 2-line panel, trivial parsing | Critical for long-distance route planning; prices vary a lot per station. |
+| **🔜 Phase 3** | `vehicle_purchase` + `vehicle_rental` | ASOP terminals (Lorville, Area18, ...) + New Deal Showroom | Medium — different layout, ship list view | Many bornes uncovered; ASOP rental prices barely tracked. |
+| **🔜 Phase 4** | `ore` | Refinery sell terminals (ARC-L1, HUR-L1, MAG-L4, CRU-L1, ...) | Medium-Heavy — dense table, multi-column | Direct raw-ore sales; medium coverage today. |
+
+Each phase reuses the existing pipeline (folder watcher, OCR queue,
+PaddleOCR, fuzzy matching against the UEX catalog, validation editor,
+live diff, audit log) — only the per-type parser, the catalog lookup
+(`/items`, `/fuel_prices`, `/vehicles`, ...) and a few new validation
+rules need to change.
+
+> Out of scope for this client: **`vehicle_pledge`** prices come from the
+> RSI Pledge Store website, not from in-game UI, so they don't match the
+> screenshot-driven workflow.
+
+### Also considered (no commitment yet)
+
+- **Refinery yields** (`data_submit_refinery`) — submit refining-job
+  results (input ore → output, method, duration). Niche but very valuable
+  for miners. Different workflow (track a job over time, not a one-shot
+  screenshot).
 
 ### Maybe later
+
 - ⏳ GPU edition (PaddleOCR on CUDA) for power users with NVIDIA GPUs.
 
 ---
