@@ -33,10 +33,7 @@ ScreenShot-2026-...   →   Inbox card · OCR pipeline    →     UEX /data_subm
 > `<SC install>\LIVE\Screenshots\` by default — that's the folder
 > SC-DataRunner watches.
 
-<!-- Add your screenshot under docs/images/hero.png, then uncomment:
 ![SC-DataRunner main window](docs/images/hero.png)
-See docs/images/README.md for the full naming convention.
--->
 
 ### Why use this over the existing tools?
 
