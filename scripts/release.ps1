@@ -22,6 +22,12 @@
         Same as B, plus `vpk upload github` from your machine. Requires
         $env:GH_TOKEN to be set to a PAT with contents:write.
 
+      Mode D — "Dev run (build + launch)":
+        Fastest dev-iteration loop: `dotnet build` (Debug or Release, no
+        publish, no Velopack pack) then launches the resulting .exe in a
+        detached process so you can keep iterating in this terminal. No
+        version bump, no git, no install pollution in %LocalAppData%.
+
     All destructive steps (commit/push/tag) ask for confirmation before
     running. You can abort at any time with Ctrl+C.
 
@@ -34,7 +40,11 @@
     "none" keeps the current <Version> as-is (useful to re-tag a fixed build).
 
 .PARAMETER Mode
-    Pre-select the mode: ci | local | localUpload.
+    Pre-select the mode: ci | local | localUpload | devRun.
+
+.PARAMETER Configuration
+    Build configuration for Mode D (devRun). Debug (default) or Release.
+    Ignored by every other mode (which always use Release).
 
 .EXAMPLE
     pwsh ./scripts/release.ps1
@@ -43,14 +53,21 @@
 .EXAMPLE
     pwsh ./scripts/release.ps1 -Bump minor -Mode ci -NonInteractive
         # bump minor, push tag, exit
+
+.EXAMPLE
+    pwsh ./scripts/release.ps1 -Mode devRun
+        # quick dev iteration: build Debug + launch the .exe
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('patch','minor','major','none')]
     [string]$Bump,
 
-    [ValidateSet('ci','local','localUpload')]
+    [ValidateSet('ci','local','localUpload','devRun')]
     [string]$Mode,
+
+    [ValidateSet('Debug','Release')]
+    [string]$Configuration = 'Debug',
 
     [switch]$NonInteractive,
 
@@ -59,7 +76,8 @@ param(
     [string]$PackId = 'SC-DataRunner',
     [string]$ReleaseChannel = 'win',
     [string]$ProjectPath = 'src/DataRunner.App.Wpf/DataRunner.App.Wpf.csproj',
-    [string]$MainExe = 'DataRunner.App.exe'
+    [string]$MainExe = 'DataRunner.App.exe',
+    [string]$TargetFramework = 'net9.0-windows'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -117,7 +135,11 @@ Info "Last tag:                         $lastTag"
 Info "Working tree:                     $(if ($dirty) { 'DIRTY (uncommitted changes)' } else { 'clean' })"
 Info "Commits ahead of origin/${branch}: $ahead"
 
-if ($branch -ne 'main' -and $branch -ne 'master') {
+if ($branch -ne 'main' -and $branch -ne 'master' -and $Mode -ne 'devRun') {
+    # Skip the branch warning for devRun: that mode is the dev-iteration
+    # loop and is supposed to run from any feature branch. The warning
+    # only matters for ci / local / localUpload (anything that produces
+    # a release artifact).
     Warn "You are on '$branch' (not main/master). Releases SHOULD usually be cut from main."
     if (-not (AskYesNo "Continue anyway?")) { exit 0 }
 }
@@ -128,11 +150,65 @@ if (-not $Mode) {
     Write-Host "  1) Publish via CI         — bump version, commit, push tag (triggers GitHub Actions, which builds & releases publicly)"
     Write-Host "  2) Local build only       — produce Setup.exe under ./releases/, no git, no GitHub"
     Write-Host "  3) Local + manual upload  — local build + vpk upload to GitHub Releases (requires \$env:GH_TOKEN)"
+    Write-Host "  4) Dev run                — quick dotnet build + launch the .exe (no Velopack, no install)"
     Write-Host ""
-    $sel = Ask 'Pick a mode (1/2/3)' '1'
-    $Mode = switch ($sel) { '1' { 'ci' }; '2' { 'local' }; '3' { 'localUpload' }; default { 'ci' } }
+    $sel = Ask 'Pick a mode (1/2/3/4)' '1'
+    $Mode = switch ($sel) {
+        '1' { 'ci' }
+        '2' { 'local' }
+        '3' { 'localUpload' }
+        '4' { 'devRun' }
+        default { 'ci' }
+    }
 }
 Step "Mode: $Mode"
+
+# ---------- 2b. Dev-run short-circuit ---------------------------------
+# devRun is the dev-iteration loop: build + launch, no Velopack, no git, no
+# version bump. We handle it entirely here and exit early so the rest of
+# the script (which is all release-ceremony machinery) stays untouched.
+if ($Mode -eq 'devRun') {
+    H1 "Plan (Dev run, $Configuration)"
+    $devOutDir = Join-Path $repoRoot "src/DataRunner.App.Wpf/bin/$Configuration/$TargetFramework"
+    $devExe = Join-Path $devOutDir $MainExe
+    Write-Host "  [x] dotnet build $ProjectPath -c $Configuration"
+    Write-Host "  [x] Launch detached: $devExe"
+    Write-Host "  [ ] git operations:    NONE"
+    Write-Host "  [ ] Version bump:      NONE"
+    Write-Host "  [ ] Velopack pack:     NONE"
+    Write-Host "  [ ] Install pollution: NONE (dev binary, not installed via Setup.exe)"
+    Write-Host ""
+    Write-Host "  Note: this build is NOT Velopack-installed, so the Updates card in" -ForegroundColor DarkGray
+    Write-Host "  Settings will show the 'developer build' notice — that's expected." -ForegroundColor DarkGray
+    Write-Host ""
+    if (-not (AskYesNo 'Proceed?' $true)) { Step 'Cancelled.'; exit 0 }
+
+    Step "Building $ProjectPath ($Configuration, no publish)"
+    dotnet build $ProjectPath -c $Configuration --nologo -v minimal
+    if ($LASTEXITCODE -ne 0) { Fail "dotnet build failed (exit $LASTEXITCODE)." }
+
+    if (-not (Test-Path $devExe)) {
+        Fail "Build succeeded but the expected exe was not found at: $devExe. Check `<TargetFramework>` in the csproj — the script assumes '$TargetFramework' (override with -TargetFramework)."
+    }
+
+    Step "Launching $MainExe (detached)"
+    # Start-Process with -WorkingDirectory pinned to the build folder so the
+    # WPF runtime can resolve all the satellite DLLs / OCR models / WPF-UI
+    # assets dropped next to the exe by `dotnet build`. Detached so closing
+    # this terminal does NOT kill the app — you can re-launch it as many
+    # times as you want without leaving zombies.
+    Start-Process -FilePath $devExe -WorkingDirectory $devOutDir
+    Info "PID: $((Get-Process -Name (Split-Path $devExe -LeafBase) -ErrorAction SilentlyContinue | Select-Object -Last 1).Id)"
+
+    H1 'Done'
+    Write-Host "  App launched in detached mode. Hack on, re-run this command to relaunch." -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Tips:" -ForegroundColor DarkGray
+    Write-Host "    - To rebuild faster: pwsh ./scripts/release.ps1 -Mode devRun" -ForegroundColor DarkGray
+    Write-Host "    - To test Release config: -Mode devRun -Configuration Release" -ForegroundColor DarkGray
+    Write-Host "    - To embed a test bearer token: `$env:UexAppBearerToken = '...'; pwsh ./scripts/release.ps1 -Mode devRun" -ForegroundColor DarkGray
+    exit 0
+}
 
 # ---------- 3. Pick / compute version --------------------------------
 function Get-NextVersion([string]$v, [string]$kind) {

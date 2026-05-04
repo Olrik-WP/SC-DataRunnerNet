@@ -116,6 +116,7 @@ public sealed class CommodityParser
         BuildPriceRows(classified, submission);
         DedupeRows(submission);
         EnrichStatus(classified, submission);
+        InferOutOfStockScu(submission);
 
         AppendReviewFlags(submission);
 
@@ -431,6 +432,30 @@ public sealed class CommodityParser
             }
         }
         return sizes;
+    }
+
+    /// <summary>
+    /// When a commodity row has <c>StatusBuy == OutOfStock</c> and no SCU was
+    /// detected by OCR, set <c>ScuBuy = 0</c> automatically. This is not a
+    /// heuristic — "Out of Stock" is by definition 0 SCU. The OCR engine often
+    /// misses the isolated "0" character on a dark background, so the SCU field
+    /// stays null and the validator would otherwise flag it as a blocking error,
+    /// forcing the user to manually type "0" on every out-of-stock row.
+    ///
+    /// Only applied when the status is <c>OutOfStock</c>. All other statuses
+    /// (Low, Medium, High, Maximum) can legitimately have ANY positive SCU
+    /// value, so we never infer for those.
+    /// </summary>
+    private static void InferOutOfStockScu(ParsedSubmission submission)
+    {
+        foreach (var row in submission.Prices)
+        {
+            if (row.StatusBuy == InventoryStatus.OutOfStock && row.ScuBuy is null)
+            {
+                row.ScuBuy = 0;
+                row.RawScu ??= "(inferred: OutOfStock → 0 SCU)";
+            }
+        }
     }
 
     private static void AppendReviewFlags(ParsedSubmission submission)

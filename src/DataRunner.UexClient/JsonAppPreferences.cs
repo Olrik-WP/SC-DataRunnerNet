@@ -20,6 +20,8 @@ public sealed class JsonAppPreferences : IAppPreferences
     public string? ScreenshotsFolder { get; set; }
     public bool DeleteScreenshotAfterSubmit { get; set; } = true;
     public bool DefaultIsProduction { get; set; } = true;
+    public bool InboxCollapsed { get; set; } = false;
+    public bool SideBySideScreenshot { get; set; } = false;
 
     public JsonAppPreferences(string? overridePath = null)
     {
@@ -41,6 +43,8 @@ public sealed class JsonAppPreferences : IAppPreferences
             ScreenshotsFolder = dto.ScreenshotsFolder;
             DeleteScreenshotAfterSubmit = dto.DeleteScreenshotAfterSubmit;
             DefaultIsProduction = dto.DefaultIsProduction;
+            InboxCollapsed = dto.InboxCollapsed;
+            SideBySideScreenshot = dto.SideBySideScreenshot;
         }
         catch
         {
@@ -64,6 +68,8 @@ public sealed class JsonAppPreferences : IAppPreferences
                 ScreenshotsFolder = ScreenshotsFolder,
                 DeleteScreenshotAfterSubmit = DeleteScreenshotAfterSubmit,
                 DefaultIsProduction = DefaultIsProduction,
+                InboxCollapsed = InboxCollapsed,
+                SideBySideScreenshot = SideBySideScreenshot,
             };
             var json = JsonSerializer.Serialize(dto, JsonOpts);
             await File.WriteAllTextAsync(_filePath, json, ct).ConfigureAwait(false);
@@ -93,5 +99,7 @@ public sealed class JsonAppPreferences : IAppPreferences
         public string? ScreenshotsFolder { get; set; }
         public bool DeleteScreenshotAfterSubmit { get; set; } = true;
         public bool DefaultIsProduction { get; set; } = true;
+        public bool InboxCollapsed { get; set; } = false;
+        public bool SideBySideScreenshot { get; set; } = false;
     }
 }

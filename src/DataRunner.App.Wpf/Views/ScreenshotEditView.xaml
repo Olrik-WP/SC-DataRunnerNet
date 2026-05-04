@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              xmlns:vm="clr-namespace:DataRunner.App.ViewModels"
+             xmlns:views="clr-namespace:DataRunner.App.Views"
              xmlns:models="clr-namespace:DataRunner.Core.Models;assembly=DataRunner.Core"
              xmlns:sys="clr-namespace:System;assembly=mscorlib"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -55,22 +56,60 @@
                            Text="Review every value before clicking Send. The submission mode (LIVE / TEST) is set globally in Settings." />
             </StackPanel>
 
-            <ui:Button Grid.Column="1"
-                       VerticalAlignment="Center"
-                       Appearance="Secondary"
-                       Padding="12,7"
-                       Click="ShowScreenshot_Click"
-                       ToolTip="Open the source screenshot in a full-screen viewer (zoom + pan).">
-                <StackPanel Orientation="Horizontal">
-                    <ui:SymbolIcon Symbol="Image24" Margin="0,0,6,0" />
-                    <TextBlock Text="Show screenshot" />
-                </StackPanel>
-            </ui:Button>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <!-- Side-by-side toggle. Standard WPF ToggleButton restyled to
+                     match WPF-UI Buttons (rounded + accent fill when checked).
+                     We use the native control because WPF-UI doesn't ship its
+                     own ToggleButton variant. -->
+                <ToggleButton IsChecked="{Binding SideBySideScreenshot, Mode=TwoWay}"
+                              Padding="10,7" Margin="0,0,8,0"
+                              ToolTip="Dock the source screenshot to the right of the form so you can verify OCR values without leaving the editor. Persisted across sessions.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="DualScreenGroup24" Margin="0,0,6,0" />
+                        <TextBlock Text="Side-by-side" />
+                    </StackPanel>
+                </ToggleButton>
+
+                <ui:Button Appearance="Secondary"
+                           Padding="12,7"
+                           Click="ShowScreenshot_Click"
+                           ToolTip="Open the source screenshot in a full-screen viewer (zoom + pan).">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Image24" Margin="0,0,6,0" />
+                        <TextBlock Text="Show screenshot" />
+                    </StackPanel>
+                </ui:Button>
+            </StackPanel>
         </Grid>
 
-        <!-- Row 1: full-width scrollable form -->
+        <!-- Row 1: form + optional screenshot panel.
+             - Column 0: scrollable form (always visible)
+             - Column 1: GridSplitter (only when side-by-side is on)
+             - Column 2: docked ScreenshotPanel (only when side-by-side is on)
+             Min-width on Col 0 (480px) keeps the commodity DataGrid usable;
+             min-width on Col 2 (300px) keeps the screenshot useful. The user
+             can drag the splitter to balance them. -->
         <Grid Grid.Row="1" Margin="20,0,20,8">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" MinWidth="520" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition>
+                    <ColumnDefinition.Style>
+                        <Style TargetType="ColumnDefinition">
+                            <Setter Property="Width" Value="0" />
+                            <Setter Property="MinWidth" Value="0" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SideBySideScreenshot}" Value="True">
+                                    <Setter Property="Width" Value="2*" />
+                                    <Setter Property="MinWidth" Value="280" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ColumnDefinition.Style>
+                </ColumnDefinition>
+            </Grid.ColumnDefinitions>
+
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
 
                 <!-- MERGED-ITEM WARNING — visible only when this submission was built
@@ -399,6 +438,24 @@
 
                 </StackPanel>
             </ScrollViewer>
+
+            <!-- Splitter + ScreenshotPanel — both visible only when SideBySideScreenshot is true. -->
+            <GridSplitter Grid.Column="1"
+                          Width="6"
+                          HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                          Background="Transparent"
+                          ShowsPreview="False"
+                          ResizeBehavior="PreviousAndNext"
+                          Visibility="{Binding SideBySideScreenshot, Converter={StaticResource BoolToVisibility}}" />
+
+            <Border Grid.Column="2"
+                    CornerRadius="4"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    Visibility="{Binding SideBySideScreenshot, Converter={StaticResource BoolToVisibility}}">
+                <views:ScreenshotPanel ImageSource="{Binding PreviewImage}"
+                                       HeaderLabel="{Binding SourceImagePath, StringFormat='Screenshot: {0}'}" />
+            </Border>
         </Grid>
 
         <!-- Row 2: STICKY validation panel + send action bar. Lives outside any

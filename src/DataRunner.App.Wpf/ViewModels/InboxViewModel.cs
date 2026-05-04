@@ -98,6 +98,33 @@ public sealed partial class InboxViewModel : ObservableObject
         });
     }
 
+    /// <summary>
+    /// True when the inbox column is collapsed to a thin strip with just a
+    /// re-expand button. The view binds the column width and the inner
+    /// content visibility to this flag.
+    /// </summary>
+    [ObservableProperty] private bool _isCollapsed;
+
+    private IAppPreferences? _prefs;
+
+    /// <summary>Wired by App.OnStartup once DI is ready, so the toggle
+    /// persists across restarts.</summary>
+    public void AttachPreferences(IAppPreferences prefs)
+    {
+        _prefs = prefs;
+        IsCollapsed = prefs.InboxCollapsed;
+    }
+
+    partial void OnIsCollapsedChanged(bool value)
+    {
+        if (_prefs is null) return;
+        _prefs.InboxCollapsed = value;
+        _ = _prefs.SaveAsync();
+    }
+
+    [RelayCommand]
+    private void ToggleCollapsed() => IsCollapsed = !IsCollapsed;
+
     public InboxViewModel()
     {
         SelectedItems.CollectionChanged += OnSelectedItemsChanged;

@@ -48,6 +48,28 @@ public interface IAppPreferences
     /// </summary>
     bool DefaultIsProduction { get; set; }
 
+    /// <summary>
+    /// When true, the inbox column is collapsed to a thin strip with just a
+    /// re-expand button. Frees ~280px of horizontal space for the editor and
+    /// the optional side-by-side screenshot panel. Persisted so the user's
+    /// preferred layout survives app restarts.
+    ///
+    /// Default: false (inbox visible).
+    /// </summary>
+    bool InboxCollapsed { get; set; }
+
+    /// <summary>
+    /// When true, the editor renders the source screenshot in a panel docked
+    /// to the right of the validation form, with a draggable splitter between
+    /// them. Lets the user verify OCR output against the source image without
+    /// alt-tabbing or opening the floating viewer. Auto-disables itself if
+    /// the editor area is too narrow to fit both panes (see EditorMinWidth in
+    /// ScreenshotEditView).
+    ///
+    /// Default: false (the user opts in via the title-bar toggle).
+    /// </summary>
+    bool SideBySideScreenshot { get; set; }
+
     /// <summary>Persists the current state to disk.</summary>
     Task SaveAsync(CancellationToken ct = default);
 

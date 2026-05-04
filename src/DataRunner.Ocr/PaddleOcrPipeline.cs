@@ -166,6 +166,25 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
             CleanReviewFlagsForTerminal(submission);
         }
 
+        // SECOND-CHANCE OCR PASS — fires only when the default pass left
+        // gaps that we have a realistic shot at recovering. Two triggers:
+        //   1. Terminal still unidentified (NULL after both banner + left header).
+        //   2. At least one commodity row has Status == Unknown (UEX rejects
+        //      submissions with `missing_inventory_status` so we MUST try harder
+        //      before giving up and asking the user to fix it manually).
+        // The retry uses ImagePreprocessor.EnhanceAggressive — same OCR engine,
+        // tighter CLAHE + unsharp mask + ×3 upscale instead of ×2. Recovered
+        // values are MERGED into the existing submission (we never overwrite a
+        // good first-pass result with a worse retry result).
+        var retryReasons = DescribeRetryReasons(submission);
+        if (retryReasons.Length > 0)
+        {
+            _logger.LogInformation(
+                "OCR retry triggered for {Img}: {Reasons}",
+                Path.GetFileName(imagePath), string.Join(", ", retryReasons));
+            RunRetryPasses(src, submission, ct, confidences, combinedText);
+        }
+
         var payload = UexPayloadBuilder.Build(submission);
 
         sw.Stop();
@@ -193,6 +212,171 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
         if (a is null) return b;
         if (b is null) return a;
         return b.Score > a.Score ? b : a;
+    }
+
+    private static string[] DescribeRetryReasons(ParsedSubmission submission)
+    {
+        var reasons = new List<string>();
+        if (submission.IdTerminal is null)
+        {
+            reasons.Add("terminal_not_detected");
+        }
+        var unknownStatusCount = submission.Prices.Count(p => p.StatusBuy == InventoryStatus.Unknown);
+        if (unknownStatusCount > 0)
+        {
+            reasons.Add($"status_unknown_x{unknownStatusCount}");
+        }
+        return reasons.ToArray();
+    }
+
+    /// <summary>
+    /// Runs the aggressive-preprocessing variants on the same source image and
+    /// merges any recovered values into <paramref name="submission"/>. We only
+    /// FILL holes — we never overwrite a value the first pass already set,
+    /// because the aggressive preprocessing trades accuracy for recall and a
+    /// good first-pass match should always win.
+    /// </summary>
+    private void RunRetryPasses(
+        Mat src,
+        ParsedSubmission submission,
+        CancellationToken ct,
+        List<double> confidences,
+        StringBuilder combinedText)
+    {
+        var retrySw = Stopwatch.StartNew();
+
+        // === RETRY 1: terminal name (banner + left header) ===
+        if (submission.IdTerminal is null)
+        {
+            TerminalMatch? recoveredBanner = null;
+            TerminalMatch? recoveredLeftHeader = null;
+
+            lock (_runLock)
+            {
+                using (var topAggr = ImagePreprocessor.ExtractTerminalNameBandAggressive(src))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var topResult = _ocr.Run(topAggr);
+                    var topRaw = RegionLayout.JoinByRows(topResult.Regions);
+                    if (topResult.Regions.Length > 0)
+                        confidences.AddRange(topResult.Regions.Select(r => (double)r.Score));
+
+                    _logger.LogInformation(
+                        "Retry top-banner OCR ({Regions} regions): {Text}",
+                        topResult.Regions.Length, topRaw.Replace("\n", " | "));
+                    combinedText.AppendLine("--- RETRY TOP BANNER PASS ---").AppendLine(topRaw);
+
+                    var topLines = topRaw.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+                    recoveredBanner = _matcher.MatchTerminalAcrossLines(topLines, minScore: 65);
+                }
+
+                if (recoveredBanner is null || recoveredBanner.Score < 90)
+                {
+                    using var leftAggr = ImagePreprocessor.ExtractLeftPanelHeaderAggressive(src);
+                    ct.ThrowIfCancellationRequested();
+                    var leftResult = _ocr.Run(leftAggr);
+                    var leftRaw = RegionLayout.JoinByRows(leftResult.Regions);
+                    if (leftResult.Regions.Length > 0)
+                        confidences.AddRange(leftResult.Regions.Select(r => (double)r.Score));
+
+                    _logger.LogInformation(
+                        "Retry left-header OCR ({Regions} regions): {Text}",
+                        leftResult.Regions.Length, leftRaw.Replace("\n", " | "));
+                    combinedText.AppendLine("--- RETRY LEFT HEADER PASS ---").AppendLine(leftRaw);
+
+                    var leftLines = leftRaw.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+                    recoveredLeftHeader = _matcher.MatchTerminalAcrossLines(leftLines, minScore: 65);
+                }
+            }
+
+            var recoveredTerminal = ChooseBetter(recoveredBanner, recoveredLeftHeader);
+            if (recoveredTerminal is not null)
+            {
+                var sourceLabel = ReferenceEquals(recoveredTerminal, recoveredBanner) ? "retry_banner" : "retry_left_header";
+                submission.IdTerminal = recoveredTerminal.Terminal.Id;
+                submission.TerminalDisplayName = recoveredTerminal.Terminal.DisplayName;
+                submission.TerminalMatchScore = recoveredTerminal.Score;
+                submission.TerminalMatchedFromOcr = recoveredTerminal.FromOcr;
+                submission.TerminalMatchedField = $"{sourceLabel}:{recoveredTerminal.MatchedField}";
+                CleanReviewFlagsForTerminal(submission);
+                _logger.LogInformation(
+                    "Retry recovered terminal: {Name} (score={Score}, source={Source})",
+                    recoveredTerminal.Terminal.DisplayName, recoveredTerminal.Score, sourceLabel);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Retry FAILED to recover terminal — manual selection required.");
+            }
+        }
+
+        // === RETRY 2: status + values for rows that have Status == Unknown ===
+        if (submission.Prices.Any(p => p.StatusBuy == InventoryStatus.Unknown))
+        {
+            string retryRightRaw;
+            lock (_runLock)
+            {
+                using var rightAggr = ImagePreprocessor.EnhanceAggressive(src, cropRightPanel: true);
+                ct.ThrowIfCancellationRequested();
+                var retryResult = _ocr.Run(rightAggr);
+                if (retryResult.Regions.Length > 0)
+                    confidences.AddRange(retryResult.Regions.Select(r => (double)r.Score));
+                retryRightRaw = RegionLayout.JoinByRows(retryResult.Regions);
+                _logger.LogInformation(
+                    "Retry right-panel OCR ({W}x{H}, {Regions} regions): {Text}",
+                    rightAggr.Width, rightAggr.Height, retryResult.Regions.Length,
+                    retryRightRaw.Replace("\n", " | "));
+                combinedText.AppendLine("--- RETRY RIGHT PANEL PASS ---").AppendLine(retryRightRaw);
+            }
+
+            // Re-run the parser on the aggressive OCR text. Only the recovered
+            // STATUS values are merged back — commodity matches and prices from
+            // the retry are NOT trusted to overwrite first-pass results because
+            // the aggressive preprocessing can alter digits and letters.
+            var retrySubmission = _parser.Parse(retryRightRaw, submission.SourceImage ?? "");
+
+            var beforeUnknownCount = submission.Prices.Count(p => p.StatusBuy == InventoryStatus.Unknown);
+            var recoveredCount = 0;
+            foreach (var existingRow in submission.Prices)
+            {
+                if (existingRow.StatusBuy != InventoryStatus.Unknown) continue;
+                if (existingRow.IdCommodity is null) continue;
+
+                var match = retrySubmission.Prices
+                    .FirstOrDefault(r => r.IdCommodity == existingRow.IdCommodity
+                        && r.StatusBuy != InventoryStatus.Unknown);
+                if (match is not null)
+                {
+                    _logger.LogInformation(
+                        "Retry recovered status for {Commodity}: {Status} (raw={Raw})",
+                        existingRow.CommodityName, match.StatusBuy, match.RawStatus);
+                    existingRow.StatusBuy = match.StatusBuy;
+                    existingRow.RawStatus = match.RawStatus;
+
+                    // When the retry detected OutOfStock, InferOutOfStockScu
+                    // already set match.ScuBuy = 0 on the retry submission.
+                    // We must propagate that to the original row too, otherwise
+                    // the row ends up with Status=OutOfStock + ScuBuy=null →
+                    // the validator flags it as "SCU missing" even though 0 is
+                    // the only valid value for an out-of-stock commodity.
+                    if (existingRow.ScuBuy is null && match.ScuBuy is not null)
+                    {
+                        existingRow.ScuBuy = match.ScuBuy;
+                        existingRow.RawScu = match.RawScu;
+                    }
+
+                    recoveredCount++;
+                }
+            }
+            _logger.LogInformation(
+                "Retry result: recovered {Recovered}/{Before} status values; {Remaining} rows still Unknown.",
+                recoveredCount, beforeUnknownCount, beforeUnknownCount - recoveredCount);
+        }
+
+        retrySw.Stop();
+        _logger.LogInformation("OCR retry passes completed in {Ms}ms.", retrySw.ElapsedMilliseconds);
     }
 
     private static void CleanReviewFlagsForTerminal(ParsedSubmission submission)
