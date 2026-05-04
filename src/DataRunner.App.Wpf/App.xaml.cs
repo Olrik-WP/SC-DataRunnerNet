@@ -102,6 +102,7 @@ public partial class App : Application
                 services.AddSingleton<InboxViewModel>();
                 services.AddSingleton<SettingsViewModel>();
                 services.AddSingleton<HistoryViewModel>();
+                services.AddSingleton<DiagnosticsViewModel>();
                 services.AddSingleton<TargetsViewModel>();
                 services.AddSingleton<UpdateViewModel>();
                 services.AddSingleton<FirstRunWizardViewModel>();

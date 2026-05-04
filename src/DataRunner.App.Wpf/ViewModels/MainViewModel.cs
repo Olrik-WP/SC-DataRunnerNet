@@ -19,6 +19,7 @@ public sealed partial class MainViewModel : ObservableObject
     public SettingsViewModel Settings { get; }
     public HistoryViewModel History { get; }
     public TargetsViewModel Targets { get; }
+    public DiagnosticsViewModel Diagnostics { get; }
     public FirstRunWizardViewModel FirstRun { get; }
     public UpdateViewModel Updates { get; }
     public OcrCoordinator Ocr { get; }
@@ -29,6 +30,7 @@ public sealed partial class MainViewModel : ObservableObject
         SettingsViewModel settings,
         HistoryViewModel history,
         TargetsViewModel targets,
+        DiagnosticsViewModel diagnostics,
         FirstRunWizardViewModel firstRun,
         UpdateViewModel updates,
         OcrCoordinator ocr)
@@ -38,6 +40,7 @@ public sealed partial class MainViewModel : ObservableObject
         Settings = settings;
         History = history;
         Targets = targets;
+        Diagnostics = diagnostics;
         FirstRun = firstRun;
         Updates = updates;
         Ocr = ocr;
@@ -60,6 +63,9 @@ public sealed partial class MainViewModel : ObservableObject
 
     [RelayCommand]
     private void NavigateHistory() => SelectedNavTag = "history";
+
+    [RelayCommand]
+    private void NavigateDiagnostics() => SelectedNavTag = "diagnostics";
 
     [RelayCommand]
     private void NavigateSettings() => SelectedNavTag = "settings";

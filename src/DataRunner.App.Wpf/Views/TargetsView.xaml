@@ -81,7 +81,7 @@
 
                 <ui:TextBox Grid.Column="0"
                             Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}"
-                            PlaceholderText="Filter by terminal or commodity..."
+                            PlaceholderText="Filter by terminal, system, or commodity..."
                             Margin="0,0,12,0" />
 
                 <CheckBox Grid.Column="1"
@@ -132,6 +132,9 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
+
+                    <DataGridTextColumn Header="System" Width="100"
+                                        Binding="{Binding StarSystemName}" />
 
                     <DataGridTextColumn Header="Terminal" Width="2*"
                                         Binding="{Binding TerminalName}" />

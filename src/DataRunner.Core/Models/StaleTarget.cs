@@ -16,6 +16,16 @@ public sealed class StaleTarget
     public required string TerminalName { get; init; }
     public required string CommodityName { get; init; }
 
+    /// <summary>
+    /// Star system the terminal belongs to (e.g. "Stanton", "Pyro").
+    /// Not present in the raw <c>commodities_prices_all</c> payload — enriched
+    /// from the terminals catalog (<see cref="UexTerminal.StarSystemName"/>).
+    /// May be empty if the catalog hasn't been refreshed yet.
+    /// Mutable on purpose so the provider can backfill it after disk-load
+    /// or after the catalog is refreshed, without rebuilding every record.
+    /// </summary>
+    public string? StarSystemName { get; set; }
+
     /// <summary>BUY (terminal sells to player) or SELL (player sells to terminal).</summary>
     public required StaleTargetType Type { get; init; }
 

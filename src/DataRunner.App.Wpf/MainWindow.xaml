@@ -86,6 +86,18 @@
                     </ui:Button>
 
                     <ui:Button Appearance="Transparent"
+                               Command="{Binding NavigateDiagnosticsCommand}"
+                               Margin="0,2"
+                               HorizontalContentAlignment="Stretch"
+                               Padding="12,10"
+                               ToolTip="Logs, submission details, system info, and bug report export">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Bug24" Margin="0,0,12,0" />
+                            <TextBlock Text="Diagnostics" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </ui:Button>
+
+                    <ui:Button Appearance="Transparent"
                                Command="{Binding NavigateSettingsCommand}"
                                Margin="0,2"
                                HorizontalContentAlignment="Stretch"
@@ -117,6 +129,12 @@
                                                 RelativeSource={RelativeSource AncestorType=Window},
                                                 Converter={StaticResource NavTagToVisibility},
                                                 ConverterParameter=history}" />
+
+                <views:DiagnosticsView DataContext="{Binding Diagnostics}"
+                                       Visibility="{Binding DataContext.SelectedNavTag,
+                                                    RelativeSource={RelativeSource AncestorType=Window},
+                                                    Converter={StaticResource NavTagToVisibility},
+                                                    ConverterParameter=diagnostics}" />
 
                 <views:SettingsView DataContext="{Binding Settings}"
                                     Visibility="{Binding DataContext.SelectedNavTag,

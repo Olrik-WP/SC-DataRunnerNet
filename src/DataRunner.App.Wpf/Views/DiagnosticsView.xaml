@@ -1,0 +1,241 @@
+<UserControl x:Class="DataRunner.App.Views.DiagnosticsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:DataRunner.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             d:DataContext="{d:DesignInstance Type=vm:DiagnosticsViewModel}"
+             mc:Ignorable="d">
+
+    <Grid Margin="32,24,32,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,16">
+            <StackPanel>
+                <TextBlock Text="Diagnostics"
+                           FontSize="28" FontWeight="SemiBold" />
+                <TextBlock Text="System info, logs, and submission details — useful for troubleshooting and bug reports."
+                           Opacity="0.7" Margin="0,4,0,0" />
+            </StackPanel>
+            <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right" Orientation="Horizontal">
+                <ui:Button Appearance="Primary"
+                           Command="{Binding CopyBugReportCommand}"
+                           Padding="14,7" Margin="0,0,8,0"
+                           ToolTip="Copies version, prefs, recent submissions, and log tail to clipboard">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="ClipboardCode24" Margin="0,0,6,0" />
+                        <TextBlock Text="Copy bug report" />
+                    </StackPanel>
+                </ui:Button>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Body: two-column layout -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- LEFT COLUMN: System info + submission detail -->
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+
+                    <!-- System info card -->
+                    <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                            CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="System info" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="130" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Version" Opacity="0.6" Margin="0,2" />
+                                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding AppVersion}" Margin="0,2" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Runtime" Opacity="0.6" Margin="0,2" />
+                                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding RuntimeInfo}" TextWrapping="Wrap" Margin="0,2" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Database" Opacity="0.6" Margin="0,2" />
+                                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DbSizeLabel}" Margin="0,2" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Catalog" Opacity="0.6" Margin="0,2" />
+                                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding CatalogStatus}" TextWrapping="Wrap" Margin="0,2" />
+
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="Data folder" Opacity="0.6" Margin="0,2" />
+                                <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding DataFolderPath}" TextWrapping="Wrap" Margin="0,2" />
+                            </Grid>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <ui:Button Appearance="Secondary" Command="{Binding OpenDataFolderCommand}"
+                                           Padding="10,5" Margin="0,0,8,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="FolderOpen24" Margin="0,0,6,0" />
+                                        <TextBlock Text="Data folder" />
+                                    </StackPanel>
+                                </ui:Button>
+                                <ui:Button Appearance="Secondary" Command="{Binding OpenLogsFolderCommand}"
+                                           Padding="10,5">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="DocumentText24" Margin="0,0,6,0" />
+                                        <TextBlock Text="Logs folder" />
+                                    </StackPanel>
+                                </ui:Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Submission detail card -->
+                    <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                            CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,8">
+                                <TextBlock Text="Submission detail" FontSize="16" FontWeight="SemiBold" />
+                                <ui:Button DockPanel.Dock="Right" Appearance="Secondary"
+                                           HorizontalAlignment="Right"
+                                           Command="{Binding CopySubmissionJsonCommand}"
+                                           Padding="10,5"
+                                           IsEnabled="{Binding SelectedSubmission, Converter={StaticResource BoolToVisibility}}"
+                                           ToolTip="Copy request + response JSON to clipboard">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Copy24" Margin="0,0,6,0" />
+                                        <TextBlock Text="Copy JSON" />
+                                    </StackPanel>
+                                </ui:Button>
+                            </DockPanel>
+
+                            <TextBlock Text="Select a submission below to inspect its full request/response payloads."
+                                       Opacity="0.6" Margin="0,0,0,8"
+                                       Visibility="{Binding SelectedSubmission, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+
+                            <DataGrid ItemsSource="{Binding RecentSubmissions}"
+                                      SelectedItem="{Binding SelectedSubmission, Mode=TwoWay}"
+                                      AutoGenerateColumns="False"
+                                      GridLinesVisibility="None"
+                                      HeadersVisibility="Column"
+                                      CanUserAddRows="False"
+                                      IsReadOnly="True"
+                                      MaxHeight="180"
+                                      Background="Transparent">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="When" Width="130"
+                                                        Binding="{Binding At, StringFormat='MM-dd HH:mm:ss'}" />
+                                    <DataGridTextColumn Header="Terminal" Width="180"
+                                                        Binding="{Binding TerminalDisplayName}" />
+                                    <DataGridTextColumn Header="OK" Width="40"
+                                                        Binding="{Binding Ok}" />
+                                    <DataGridTextColumn Header="HTTP" Width="50"
+                                                        Binding="{Binding HttpStatusCode}" />
+                                    <DataGridTextColumn Header="API" Width="80"
+                                                        Binding="{Binding ApiStatus}" />
+                                    <DataGridTextColumn Header="Message" Width="*"
+                                                        Binding="{Binding ApiMessage}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <!-- JSON panels -->
+                            <Grid Margin="0,12,0,0"
+                                  Visibility="{Binding SelectedSubmission, Converter={StaticResource BoolToVisibility}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Request JSON" FontWeight="SemiBold" Opacity="0.7" Margin="0,0,0,4" />
+                                    <TextBox Text="{Binding SelectedRequestJson, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             MaxHeight="260"
+                                             FontFamily="Cascadia Code, Consolas, monospace"
+                                             FontSize="11"
+                                             Padding="8" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Response JSON" FontWeight="SemiBold" Opacity="0.7" Margin="0,0,0,4" />
+                                    <TextBox Text="{Binding SelectedResponseJson, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             MaxHeight="260"
+                                             FontFamily="Cascadia Code, Consolas, monospace"
+                                             FontSize="11"
+                                             Padding="8" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+            </ScrollViewer>
+
+            <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Center"
+                          VerticalAlignment="Stretch" Background="Transparent" />
+
+            <!-- RIGHT COLUMN: Log viewer -->
+            <Border Grid.Column="2"
+                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="16">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                        <TextBlock Text="Application logs" FontSize="16" FontWeight="SemiBold" />
+                        <ui:Button DockPanel.Dock="Right" Appearance="Secondary"
+                                   HorizontalAlignment="Right"
+                                   Command="{Binding LoadLogsCommand}"
+                                   Padding="10,5">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="ArrowSync24" Margin="0,0,6,0" />
+                                <TextBlock Text="Reload" />
+                            </StackPanel>
+                        </ui:Button>
+                    </DockPanel>
+
+                    <TextBox Grid.Row="1"
+                             Text="{Binding LogContent, Mode=OneWay}"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="NoWrap"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Auto"
+                             FontFamily="Cascadia Code, Consolas, monospace"
+                             FontSize="11"
+                             Padding="8" />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Status bar -->
+        <TextBlock Grid.Row="2"
+                   Text="{Binding StatusMessage}"
+                   Opacity="0.8" FontSize="12"
+                   Foreground="MediumSeaGreen"
+                   Margin="0,8,0,0" />
+    </Grid>
+</UserControl>

@@ -148,6 +148,8 @@ public sealed partial class TargetsViewModel : ObservableObject
             var needle = FilterText.Trim();
             if (t.TerminalName.Contains(needle, StringComparison.OrdinalIgnoreCase)) return true;
             if (t.CommodityName.Contains(needle, StringComparison.OrdinalIgnoreCase)) return true;
+            if (!string.IsNullOrEmpty(t.StarSystemName)
+                && t.StarSystemName.Contains(needle, StringComparison.OrdinalIgnoreCase)) return true;
             return false;
         }
 

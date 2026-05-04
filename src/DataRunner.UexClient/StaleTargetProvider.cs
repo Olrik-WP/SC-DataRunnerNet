@@ -21,6 +21,7 @@ public sealed class StaleTargetProvider : IStaleTargetProvider
     private static readonly TimeSpan DefaultManualThrottle = TimeSpan.FromMinutes(5);
 
     private readonly IUexApiClient _api;
+    private readonly ICatalogProvider _catalog;
     private readonly ILogger<StaleTargetProvider> _logger;
     private readonly string _cachePath;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -31,18 +32,53 @@ public sealed class StaleTargetProvider : IStaleTargetProvider
 
     public StaleTargetProvider(
         IUexApiClient api,
+        ICatalogProvider catalog,
         ILogger<StaleTargetProvider> logger,
         string? overrideCachePath = null,
         TimeSpan? autoRefreshTtl = null,
         TimeSpan? manualThrottle = null)
     {
         _api = api;
+        _catalog = catalog;
         _logger = logger;
         _cachePath = overrideCachePath ?? DefaultCachePath();
         MinAutoRefreshInterval = autoRefreshTtl ?? DefaultAutoRefreshTtl;
         MinManualRefreshInterval = manualThrottle ?? DefaultManualThrottle;
         Directory.CreateDirectory(Path.GetDirectoryName(_cachePath)!);
         TryLoadFromDisk();
+
+        // The catalog may finish loading AFTER we already restored stale targets
+        // from disk (or after the API refresh). When that happens, backfill the
+        // StarSystemName on every existing target and notify the UI.
+        _catalog.Refreshed += OnCatalogRefreshed;
+    }
+
+    private void OnCatalogRefreshed(object? sender, EventArgs e)
+    {
+        if (_targets.Count == 0) return;
+        if (EnrichWithCatalog(_targets))
+            Refreshed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Looks up <see cref="StaleTarget.StarSystemName"/> for every record from the
+    /// terminals catalog. Mutates the list in place. Returns true if at least one
+    /// record was updated, so callers can decide whether to re-broadcast Refreshed.
+    /// </summary>
+    private bool EnrichWithCatalog(IList<StaleTarget> targets)
+    {
+        var changed = false;
+        foreach (var t in targets)
+        {
+            var terminal = _catalog.GetTerminal(t.IdTerminal);
+            var sys = terminal?.StarSystemName;
+            if (!string.Equals(t.StarSystemName, sys, StringComparison.Ordinal))
+            {
+                t.StarSystemName = sys;
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     public IReadOnlyList<StaleTarget> Targets => _targets;
@@ -90,6 +126,7 @@ public sealed class StaleTargetProvider : IStaleTargetProvider
             var raw = await _api.GetAllCommodityPricesAsync(ct).ConfigureAwait(false);
 
             var targets = BuildTargets(raw, DateTimeOffset.UtcNow);
+            EnrichWithCatalog(targets);
             _targets = targets;
             _lastRefreshedAt = DateTimeOffset.UtcNow;
 
@@ -189,6 +226,13 @@ public sealed class StaleTargetProvider : IStaleTargetProvider
 
             _targets = dto.Targets ?? new();
             _lastRefreshedAt = dto.RefreshedAt;
+
+            // Older cache files (pre-system-column) didn't persist StarSystemName
+            // on each row. Backfill from the catalog on load — if the catalog
+            // is itself still cold, the second pass via OnCatalogRefreshed will
+            // catch up. Either way the user sees system info as soon as it's known.
+            EnrichWithCatalog(_targets);
+
             _logger.LogInformation(
                 "Loaded {Count} stale targets from disk cache ({Age:c} old).",
                 _targets.Count,
