@@ -54,6 +54,25 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     /// <summary>How many source screenshots compose the bound item.</summary>
     public int MergedSourceCount => _bound?.SourcePaths?.Count ?? 1;
 
+    /// <summary>
+    /// True when the editor renders the source screenshot in a docked panel
+    /// to the right of the validation form. Persisted to <see cref="IAppPreferences"/>
+    /// so the user's layout choice survives across sessions. The view also
+    /// uses min-width thresholds to auto-disable the side panel on narrow
+    /// screens (so the form stays usable on a 1366×768 laptop).
+    /// </summary>
+    [ObservableProperty] private bool _sideBySideScreenshot;
+
+    partial void OnSideBySideScreenshotChanged(bool value)
+    {
+        if (_prefs is null) return;
+        _prefs.SideBySideScreenshot = value;
+        _ = _prefs.SaveAsync();
+    }
+
+    [RelayCommand]
+    private void ToggleSideBySide() => SideBySideScreenshot = !SideBySideScreenshot;
+
     [ObservableProperty] private UexTerminal? _selectedTerminal;
     [ObservableProperty] private string _terminalSearch = "";
     [ObservableProperty] private bool _isTerminalDropDownOpen;
@@ -149,6 +168,14 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
 
         foreach (var c in _catalog.Commodities.OrderBy(c => c.Name))
             CommodityOptions.Add(c);
+
+        // Hydrate persisted layout preference. We set the BACKING FIELD directly
+        // (not the property) to avoid the OnSideBySideScreenshotChanged partial
+        // method firing during construction, which would write the value back to
+        // prefs.json for no reason. PropertyChanged is raised manually so any
+        // bound view sees the initial value.
+        _sideBySideScreenshot = _prefs.SideBySideScreenshot;
+        OnPropertyChanged(nameof(SideBySideScreenshot));
 
         // Live validation: re-run on every relevant change. We hook three sources:
         //   - the Rows collection itself (add/remove)
@@ -354,13 +381,21 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
                 });
             }
 
+            // Inventory status MUST be set before submission. Sending /data_submit
+            // without status_buy triggers UEX's `missing_inventory_status` rejection
+            // (the row gets accepted by the API but flagged for manual review by
+            // UEX staff, who then refuse the report). Auto-defaulting Unknown to
+            // Maximum was tempting but would silently push wrong data into the
+            // shared UEX dataset — block instead, force the user to pick one,
+            // override checkbox available for the rare case where they want to
+            // submit anyway.
             if (r.Status == InventoryStatus.Unknown)
             {
                 ValidationIssues.Add(new LiveValidationIssue
                 {
-                    Severity = LiveValidationSeverity.Warning,
+                    Severity = LiveValidationSeverity.Error,
                     Code = "row_status_unknown",
-                    Message = $"{label}: inventory status is Unknown — pick one.",
+                    Message = $"{label}: inventory status is Unknown — pick the right one in the dropdown (Maximum / High / Medium / Low / Out of stock). UEX rejects submissions with missing status.",
                     RowIndex = i,
                 });
             }
@@ -900,8 +935,11 @@ public sealed partial class EditableRow : ObservableObject
     [ObservableProperty] private double _matchScore;
     [ObservableProperty] private string _fromOcr = "";
 
-    /// <summary>True if SCU is missing/zero. Empty SCU + missing IsMissing flag = blocking error.</summary>
-    public bool ScuIsEmpty => ScuValue is null or <= 0;
+    /// <summary>True if SCU is missing or invalid. SCU == 0 is valid ONLY when
+    /// the status is OutOfStock (by definition, out of stock = 0 SCU). For all
+    /// other statuses, SCU must be a positive number.</summary>
+    public bool ScuIsEmpty => ScuValue is null
+        || (ScuValue <= 0 && Status != InventoryStatus.OutOfStock);
 
     /// <summary>True if Price is missing/zero. Empty price = blocking error.</summary>
     public bool PriceIsEmpty => PriceValue is null or <= 0;
@@ -935,6 +973,10 @@ public sealed partial class EditableRow : ObservableObject
     partial void OnCommodityChanged(UexCommodity? value) => OnPropertyChanged(nameof(CommodityIsMissing));
     partial void OnScuValueChanged(int? value) => OnPropertyChanged(nameof(ScuIsEmpty));
     partial void OnPriceValueChanged(double? value) => OnPropertyChanged(nameof(PriceIsEmpty));
-    partial void OnStatusChanged(InventoryStatus value) => OnPropertyChanged(nameof(StatusIsUnknown));
+    partial void OnStatusChanged(InventoryStatus value)
+    {
+        OnPropertyChanged(nameof(StatusIsUnknown));
+        OnPropertyChanged(nameof(ScuIsEmpty));
+    }
     partial void OnMatchScoreChanged(double value) => OnPropertyChanged(nameof(MatchSeverity));
 }

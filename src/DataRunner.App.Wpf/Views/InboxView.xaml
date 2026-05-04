@@ -13,23 +13,76 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="320" MinWidth="240" MaxWidth="500" />
+            <ColumnDefinition>
+                <ColumnDefinition.Style>
+                    <Style TargetType="ColumnDefinition">
+                        <Setter Property="Width" Value="320" />
+                        <Setter Property="MinWidth" Value="240" />
+                        <Setter Property="MaxWidth" Value="500" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsCollapsed}" Value="True">
+                                <Setter Property="Width" Value="40" />
+                                <Setter Property="MinWidth" Value="40" />
+                                <Setter Property="MaxWidth" Value="40" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ColumnDefinition.Style>
+            </ColumnDefinition>
             <ColumnDefinition Width="4" />
             <ColumnDefinition Width="*" MinWidth="400" />
         </Grid.ColumnDefinitions>
 
-        <!-- LEFT: list of pending screenshots -->
+        <!-- LEFT: list of pending screenshots (collapsible) -->
         <Border Grid.Column="0"
                 BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
                 BorderThickness="0,0,1,0">
-            <DockPanel>
+
+            <Grid>
+                <!-- COLLAPSED STRIP — vertical bar with just the expand button +
+                     pending count badge. Lets the user reclaim screen real estate
+                     while keeping the inbox 1 click away. -->
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Top"
+                            Margin="0,12,0,0"
+                            Visibility="{Binding IsCollapsed, Converter={StaticResource BoolToVisibility}}">
+                    <ui:Button Command="{Binding ToggleCollapsedCommand}"
+                               Appearance="Secondary"
+                               Width="32" Height="32" Padding="0"
+                               ToolTip="Expand inbox">
+                        <ui:SymbolIcon Symbol="ChevronRight24" />
+                    </ui:Button>
+                    <Border Margin="0,8,0,0" CornerRadius="10" Padding="6,2"
+                            HorizontalAlignment="Center"
+                            Background="{DynamicResource AccentFillColorDefaultBrush}"
+                            Visibility="{Binding Items.Count, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="{Binding Items.Count}"
+                                   FontSize="11" FontWeight="SemiBold"
+                                   Foreground="White" />
+                    </Border>
+                </StackPanel>
+
+                <!-- FULL CONTENT — visible only when NOT collapsed. Same layout as
+                     before (Import / rescan dropdown / delete / open-folder /
+                     merge / list of cards). -->
+            <DockPanel Visibility="{Binding IsCollapsed, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}">
                 <Border DockPanel.Dock="Top" Padding="16,14">
                     <StackPanel>
-                        <TextBlock Text="Inbox"
-                                   FontSize="22" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                        <TextBlock Text="Screenshots queued for review"
-                                   FontSize="12" Opacity="0.65" Margin="0,2,0,0" />
+                        <DockPanel>
+                            <ui:Button DockPanel.Dock="Right"
+                                       Command="{Binding ToggleCollapsedCommand}"
+                                       Appearance="Secondary"
+                                       Padding="6" Width="28" Height="28"
+                                       ToolTip="Collapse inbox to free space for the editor">
+                                <ui:SymbolIcon Symbol="ChevronLeft24" FontSize="14" />
+                            </ui:Button>
+                            <StackPanel>
+                                <TextBlock Text="Inbox"
+                                           FontSize="22" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                <TextBlock Text="Screenshots queued for review"
+                                           FontSize="12" Opacity="0.65" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DockPanel>
 
                         <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                             <ui:Button Appearance="Primary"
@@ -240,6 +293,7 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
             </DockPanel>
+            </Grid>
         </Border>
 
         <!-- SPLITTER between inbox and editor. ResizeBehavior=PreviousAndNext lets
@@ -250,7 +304,8 @@
                       VerticalAlignment="Stretch"
                       Background="Transparent"
                       ShowsPreview="False"
-                      ResizeBehavior="PreviousAndNext" />
+                      ResizeBehavior="PreviousAndNext"
+                      Visibility="{Binding IsCollapsed, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
 
         <!-- RIGHT: editor.
              We anchor the editor binding via RelativeSource so that the Visibility

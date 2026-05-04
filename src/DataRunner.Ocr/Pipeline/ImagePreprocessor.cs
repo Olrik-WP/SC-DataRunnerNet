@@ -48,6 +48,101 @@ public static class ImagePreprocessor
         }
     }
 
+    /// <summary>
+    /// Aggressive variant of <see cref="Enhance"/>, used as a SECOND-CHANCE
+    /// preprocessing when the default pass left holes (eg. an OCR row whose
+    /// "MAX INVENTORY" status was not detected). Trades runtime + minor
+    /// distortion for a real shot at recovering missed text:
+    ///   - tighter CLAHE (clipLimit 4.0, 4×4 tiles) → more local contrast
+    ///   - unsharp mask → crisper edges (good for the SC glow-heavy font)
+    ///   - upscale ×3 instead of ×2 → small status labels become big enough
+    ///     for PaddleOCR's recognizer to read confidently
+    ///
+    /// Caller MUST dispose the returned Mat.
+    /// </summary>
+    public static Mat EnhanceAggressive(Mat src, bool cropRightPanel = true)
+    {
+        if (src.Empty()) throw new ArgumentException("Source image is empty.");
+
+        Mat working = cropRightPanel ? CropRightPanel(src) : src.Clone();
+        try
+        {
+            ApplyClaheAggressive(working);
+            ApplyUnsharpMask(working);
+
+            var dst = new Mat();
+            Cv2.Resize(working, dst, new Size(working.Width * 3, working.Height * 3),
+                interpolation: InterpolationFlags.Lanczos4);
+            working.Dispose();
+            return dst;
+        }
+        catch
+        {
+            working.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Aggressive variant for the top banner (terminal name) — same recipe as
+    /// <see cref="EnhanceAggressive"/> but operating on the top band only.
+    /// </summary>
+    public static Mat ExtractTerminalNameBandAggressive(Mat src)
+    {
+        if (src.Empty()) throw new ArgumentException("Source image is empty.");
+
+        var height = (int)(src.Height * TopBandHeightFraction);
+        if (height < 20) height = Math.Min(60, src.Height);
+        var roi = new Rect(0, 0, src.Width, height);
+        var band = new Mat(src, roi).Clone();
+        try
+        {
+            ApplyClaheAggressive(band);
+            ApplyUnsharpMask(band);
+            var dst = new Mat();
+            Cv2.Resize(band, dst, new Size(band.Width * 3, band.Height * 3),
+                interpolation: InterpolationFlags.Lanczos4);
+            band.Dispose();
+            return dst;
+        }
+        catch
+        {
+            band.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Aggressive variant for the left panel header (terminal name fallback).
+    /// </summary>
+    public static Mat ExtractLeftPanelHeaderAggressive(Mat src)
+    {
+        if (src.Empty()) throw new ArgumentException("Source image is empty.");
+
+        var width = (int)(src.Width * LeftHeaderWidthFraction);
+        var height = (int)(src.Height * LeftHeaderHeightFraction);
+        if (width < 100) width = Math.Min(src.Width, 100);
+        if (height < 60) height = Math.Min(src.Height, 60);
+
+        var roi = new Rect(0, 0, width, height);
+        var crop = new Mat(src, roi).Clone();
+        try
+        {
+            ApplyClaheAggressive(crop);
+            ApplyUnsharpMask(crop);
+            var dst = new Mat();
+            Cv2.Resize(crop, dst, new Size(crop.Width * 3, crop.Height * 3),
+                interpolation: InterpolationFlags.Lanczos4);
+            crop.Dispose();
+            return dst;
+        }
+        catch
+        {
+            crop.Dispose();
+            throw;
+        }
+    }
+
     public static Mat ExtractLeftPanelHeader(Mat src)
     {
         if (src.Empty()) throw new ArgumentException("Source image is empty.");
@@ -101,13 +196,26 @@ public static class ImagePreprocessor
 
     private static void ApplyClahe(Mat working)
     {
+        ApplyClaheCore(working, clipLimit: 2.5, tileSize: 8);
+    }
+
+    /// <summary>Tighter CLAHE for the aggressive retry pass: higher clip limit
+    /// + smaller tiles boost local contrast on dim status labels that the
+    /// default pass missed.</summary>
+    private static void ApplyClaheAggressive(Mat working)
+    {
+        ApplyClaheCore(working, clipLimit: 4.0, tileSize: 4);
+    }
+
+    private static void ApplyClaheCore(Mat working, double clipLimit, int tileSize)
+    {
         using var lab = new Mat();
         Cv2.CvtColor(working, lab, ColorConversionCodes.BGR2Lab);
 
         var labChannels = Cv2.Split(lab);
         try
         {
-            using var clahe = Cv2.CreateCLAHE(clipLimit: 2.5, tileGridSize: new Size(8, 8));
+            using var clahe = Cv2.CreateCLAHE(clipLimit: clipLimit, tileGridSize: new Size(tileSize, tileSize));
             clahe.Apply(labChannels[0], labChannels[0]);
 
             using var merged = new Mat();
@@ -118,6 +226,16 @@ public static class ImagePreprocessor
         {
             foreach (var c in labChannels) c.Dispose();
         }
+    }
+
+    /// <summary>Unsharp mask: GaussianBlur(src) + AddWeighted(src, 1+amount,
+    /// blur, -amount). Accentuates edges, particularly useful on the SC font
+    /// which has soft anti-aliased glow that confuses OCR recognizers.</summary>
+    private static void ApplyUnsharpMask(Mat working)
+    {
+        using var blur = new Mat();
+        Cv2.GaussianBlur(working, blur, new Size(0, 0), sigmaX: 1.5);
+        Cv2.AddWeighted(working, 1.6, blur, -0.6, 0, working);
     }
 
     private static Mat CropRightPanel(Mat src)

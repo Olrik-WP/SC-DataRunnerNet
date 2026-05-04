@@ -137,6 +137,13 @@ public partial class App : Application
         var settings = Host.Services.GetRequiredService<SettingsViewModel>();
         inbox.GetScreenshotsFolderPath = () => settings.ScreenshotsFolder;
 
+        // Hand the prefs reference to the inbox so its collapse toggle can
+        // persist across app restarts. Same pattern (delegate / property)
+        // we use for OnImportRequested / OnRescanRequested to avoid a circular
+        // DI dependency: the inbox is a singleton resolved BEFORE prefs hydrate.
+        var prefs = Host.Services.GetRequiredService<IAppPreferences>();
+        inbox.AttachPreferences(prefs);
+
         await EnsureCatalogReadyAsync();
 
         var secretStore = Host.Services.GetRequiredService<ISecretKeyStore>();
