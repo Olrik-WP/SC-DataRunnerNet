@@ -40,8 +40,6 @@ ScreenShot-2026-...   →   Inbox card · OCR pipeline    →     UEX /data_subm
 - **Open-source under AGPL-3.0** — you can audit every byte, fork it, run
   your own UEX app, or ship a private build. No closed binaries from a
   random Discord download.
-- **Multilingual fonts handled out of the box** thanks to PaddleOCR (vs.
-  Tesseract-only in older tools).
 - **Real validation pipeline** — fuzzy match against the UEX catalog, length
   penalty to kill the classic "Stims → Tin" false positive, status-leak
   protection, container-size union across rows, live diff vs. the current

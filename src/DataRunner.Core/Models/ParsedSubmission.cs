@@ -11,6 +11,19 @@ public sealed class ParsedSubmission
     public int IsProduction { get; set; } = 0;
     public TerminalTab Tab { get; set; } = TerminalTab.Unknown;
 
+    /// <summary>
+    /// Width of the source screenshot in pixels (0 when not set, eg. test
+    /// submissions built from raw text). Surfaced to the validation UI so
+    /// it can warn the user when the image was clearly resized / cropped
+    /// to a non-standard aspect ratio (which degrades the small-glyph OCR
+    /// reliability — most importantly the terminal name in the LEFT panel).
+    /// </summary>
+    public int SourceImageWidth { get; set; }
+
+    /// <summary>Height of the source screenshot in pixels. See
+    /// <see cref="SourceImageWidth"/>.</summary>
+    public int SourceImageHeight { get; set; }
+
     public int? IdTerminal { get; set; }
     public string? TerminalDisplayName { get; set; }
     public double TerminalMatchScore { get; set; }

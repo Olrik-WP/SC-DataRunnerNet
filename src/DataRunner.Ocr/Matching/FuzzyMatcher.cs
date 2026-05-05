@@ -20,6 +20,12 @@ public sealed class FuzzyMatcher
         var token = Normalize(raw);
         if (token.Length < 3) return null;
 
+        // UI noise filter: a single OCR line that essentially IS one of the
+        // SC commodity-screen UI labels (COMMODITIES, YOUR INVENTORIES, ...)
+        // must never resolve to a terminal — those labels are static UI
+        // chrome, not terminal identifiers.
+        if (IsUiNoiseLabel(token)) return null;
+
         TerminalMatch? best = null;
 
         foreach (var t in _catalog.CommodityTerminals)
@@ -124,6 +130,86 @@ public sealed class FuzzyMatcher
     }
 
     /// <summary>
+    /// Minimum alphabetic-character content a sliding OCR window must
+    /// carry before we even try to match it against the terminal catalog.
+    /// 6 corresponds to roughly one short real word (eg. "EVERUS",
+    /// "HICKES", "DEAKIN") — enough information for fuzzy ratio to be
+    /// meaningful.
+    ///
+    /// Below this floor the retry pass on screenshots that hide the
+    /// terminal name (eg. when an in-game HUD overlay covers the top
+    /// banner) produces fragments like "FPS.", "tE", "1 2 4 8" — pure
+    /// noise. Combining 2-3 such fragments into a 5-letter token like
+    /// "FPS. TE" then gets spuriously matched to a long terminal name
+    /// (observed: "FPS. TE" → "People's Service Station Theta", score
+    /// 71) via PartialRatio / TokenSetRatio's substring-bonus heuristics,
+    /// which happily find some 5-char overlap with any sufficiently long
+    /// catalog candidate.
+    /// </summary>
+    private const int MinTerminalLetters = 6;
+
+    /// <summary>
+    /// Static SC commodity-screen UI labels that the OCR consistently
+    /// pulls out of the LEFT panel header / right panel — they are NEVER
+    /// terminal names, so we drop any sliding window whose normalized
+    /// content fuzzy-matches one of them above
+    /// <see cref="UiNoiseFuzzyThreshold"/>.
+    /// <para>
+    /// Without this filter the deeper left-header crop introduced for
+    /// letterboxed captures starts catching strings like
+    /// <c>"YOUR INVENTORIES"</c> and <c>"SELECT SUB-CATEGORY"</c>, which
+    /// FuzzySharp's WeightedRatio happily mangles into matches like
+    /// <c>"YOUR INVENTORIES" → "Orison"</c> at score 67 (observed on
+    /// terminal_screenshot-5.jpg). Suppressing them at the matcher
+    /// level keeps the recovery threshold loose enough to catch real
+    /// terminals while throwing away garbage.
+    /// </para>
+    /// </summary>
+    private static readonly string[] UiNoiseLabels =
+    {
+        "COMMODITIES",
+        "YOUR INVENTORIES",
+        "SHOP INVENTORY",
+        "SELECT SUB CATEGORY",
+        "SELECT SUB-CATEGORY",
+        "IN DEMAND",
+        "NO DEMAND",
+        "CANNOT SELL",
+        "LOCAL MARKET VALUE",
+        "CURRENT BALANCE",
+        "AVAILABLE CARGO SIZE",
+        "CARGO SIZE",
+        "OUT OF STOCK",
+        "MAX INVENTORY",
+        "MAXIMUM INVENTORY",
+    };
+
+    /// <summary>
+    /// Fuzzy-similarity threshold above which an OCR window is considered
+    /// a "UI noise" label and skipped before terminal matching. Tuned just
+    /// loose enough to catch garbled OCR variants like
+    /// <c>"YOURSIOVEHTORTES"</c> (= "YOUR INVENTORIES") while letting
+    /// real terminal names through.
+    /// </summary>
+    private const int UiNoiseFuzzyThreshold = 75;
+
+    /// <summary>
+    /// True when the OCR fragment is so similar to a known SC UI label
+    /// that matching it against the terminal catalog would always be a
+    /// false positive. Centralizes the noise check so both single-line
+    /// and multi-line matching paths share the same gate.
+    /// </summary>
+    private static bool IsUiNoiseLabel(string normalized)
+    {
+        foreach (var label in UiNoiseLabels)
+        {
+            if (Fuzz.WeightedRatio(normalized, label) >= UiNoiseFuzzyThreshold)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Tries to detect a terminal across multiple OCR lines by combining adjacent lines
     /// into 1-, 2-, or 3-line windows and keeping the best match.
     /// </summary>
@@ -137,6 +223,21 @@ public sealed class FuzzyMatcher
             {
                 var combined = string.Join(' ', lines.Skip(i).Take(span));
                 if (combined.Length < 4) continue;
+
+                var letterCount = 0;
+                foreach (var ch in combined)
+                {
+                    if (char.IsLetter(ch)) letterCount++;
+                }
+                if (letterCount < MinTerminalLetters) continue;
+
+                // UI noise filter: drop windows that are essentially a SC
+                // commodity-screen label (COMMODITIES, YOUR INVENTORIES,
+                // IN DEMAND, ...). These would otherwise spuriously match
+                // unrelated terminals via the substring/token-set bonus
+                // in FuzzySharp.WeightedRatio.
+                if (IsUiNoiseLabel(Normalize(combined))) continue;
+
                 var match = MatchTerminal(combined, minScore: 0);
                 if (match is null) continue;
                 if (best is null || match.Score > best.Score)

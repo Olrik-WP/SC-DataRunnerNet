@@ -67,6 +67,7 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
         TerminalMatch? bannerMatch;
         TerminalMatch? leftHeaderMatch = null;
         string rightRaw;
+        TerminalTab detectedActiveTab = TerminalTab.Unknown;
 
         // PaddleOcrAll.Run is NOT re-entrant; serialise per-instance.
         lock (_runLock)
@@ -146,12 +147,49 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
                     rightRaw.Replace("\n", " | "));
 
                 combinedText.AppendLine("--- RIGHT PANEL PASS ---").AppendLine(rightRaw);
+
+                // Saturation-based active-tab detection. The OCR text
+                // alone cannot tell BUY from LOCAL MARKET VALUE because
+                // both labels are always rendered on the tab bar; we
+                // mirror the visual signal the user sees in-game
+                // (saturated theme colour on the active tab — teal on
+                // most stations, amber/orange on a handful of faction
+                // terminals — vs. grey/white on the inactive one). The
+                // discrimination is hue-agnostic on purpose. Runs against
+                // the ORIGINAL src image — not the CLAHE preprocessed
+                // Mat — to preserve true colour saturation.
+                var rightPanelStartX = ImagePreprocessor.GetRightPanelStartX(src);
+                var rightPanelWidth = src.Width - rightPanelStartX;
+                var scaleFactor = rightPanelWidth > 0
+                    ? preprocessed.Width / (double)rightPanelWidth
+                    : 1.0;
+                detectedActiveTab = TabDetector.DetectActiveTab(
+                    src, ocrResult.Regions, rightPanelStartX, scaleFactor);
+                _logger.LogInformation(
+                    "Active-tab detection (color-based): {Tab} (scale={Scale:F2})",
+                    detectedActiveTab, scaleFactor);
             }
         }
 
         var preferredTerminalMatch = ChooseBetter(bannerMatch, leftHeaderMatch);
 
         var submission = _parser.Parse(rightRaw, Path.GetFileName(imagePath));
+        submission.SourceImageWidth = src.Width;
+        submission.SourceImageHeight = src.Height;
+
+        // Override the parser's text-only tab guess (which, by design, can
+        // never reliably distinguish active from inactive labels) with the
+        // colour-based decision when we have one. Only trust a confident
+        // result; otherwise leave the parser's fallback in place.
+        if (detectedActiveTab is TerminalTab.Buy or TerminalTab.Sell)
+        {
+            submission.Tab = detectedActiveTab;
+            submission.NeedsReview.RemoveAll(f =>
+                f.StartsWith("tab_assumed_", StringComparison.Ordinal)
+                || f == "tab_unknown");
+            submission.NeedsReview.Add(
+                $"tab_detected_{detectedActiveTab.ToString().ToLowerInvariant()}");
+        }
 
         if (preferredTerminalMatch is not null
             && (submission.IdTerminal is null
@@ -355,7 +393,7 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
                     existingRow.StatusBuy = match.StatusBuy;
                     existingRow.RawStatus = match.RawStatus;
 
-                    // When the retry detected OutOfStock, InferOutOfStockScu
+                    // When the retry detected OutOfStock, InferOutOfStockState
                     // already set match.ScuBuy = 0 on the retry submission.
                     // We must propagate that to the original row too, otherwise
                     // the row ends up with Status=OutOfStock + ScuBuy=null →

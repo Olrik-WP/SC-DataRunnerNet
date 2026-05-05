@@ -16,10 +16,54 @@ namespace DataRunner.Ocr.Pipeline;
 /// </summary>
 public static class ImagePreprocessor
 {
-    private const double RightPanelStartFraction = 0.55;
+    internal const double RightPanelStartFraction = 0.55;
     private const double TopBandHeightFraction = 0.15;
     private const double LeftHeaderWidthFraction = 0.55;
-    private const double LeftHeaderHeightFraction = 0.30;
+
+    /// <summary>
+    /// Fraction of the source-image height covered by the left-panel header
+    /// crop (the band that contains <c>COMMODITIES</c> + <c>YOUR INVENTORIES</c>
+    /// + the actual terminal name on its own line).
+    /// <para>
+    /// 0.45 instead of a tighter 0.30 because users sometimes submit
+    /// captures that have been letterboxed-cropped after the fact (eg.
+    /// a 1753×690 still pulled from a Git PR), which compresses the
+    /// vertical axis. With 0.30 the terminal name on a 690-pixel-tall
+    /// image lands right at the bottom edge of the crop and gets cut
+    /// off — observed on terminal_screenshot-5.jpg where retry produced
+    /// only <c>COMMODITIES | YOUR INVENTORIES</c> and missed
+    /// <c>NYX GATEWAY</c> entirely.
+    /// </para>
+    /// <para>
+    /// 0.45 captures the terminal name reliably AND adds a margin for
+    /// the SELECT SUB-CATEGORY block below. The extra noise (sub-category
+    /// labels and a few inventory items on native 1080p+ captures) is
+    /// filtered by <see cref="DataRunner.Ocr.Matching.FuzzyMatcher"/>'s
+    /// UI-noise filter so we don't spuriously match terminals on
+    /// strings like <c>"IN DEMAND"</c>.
+    /// </para>
+    /// </summary>
+    private const double LeftHeaderHeightFraction = 0.45;
+
+    /// <summary>
+    /// Absolute floor (in source pixels) for the left-header crop height.
+    /// Without this floor, very short captures (eg. 1753×690) under-crop
+    /// even at the relaxed 0.45 fraction. 360 px is the height the
+    /// terminal name reliably reaches on the worst observed aspect ratios
+    /// while staying inside the LEFT panel content area.
+    /// </summary>
+    private const int LeftHeaderMinHeightPixels = 360;
+
+    /// <summary>
+    /// Returns the X coordinate (in <paramref name="src"/> pixel space) at
+    /// which the right panel — the only OCR region that contains shop
+    /// inventory data — begins. Exposed so consumers that need to map
+    /// regions detected on the cropped+upscaled panel back to the original
+    /// image coordinates (eg. <see cref="TabDetector"/>) stay in sync with
+    /// <see cref="CropRightPanel"/>.
+    /// </summary>
+    public static int GetRightPanelStartX(Mat src)
+        => (int)(src.Width * RightPanelStartFraction);
 
     public static Mat Enhance(Mat src, bool upscale = true, bool cropRightPanel = true)
     {
@@ -119,10 +163,7 @@ public static class ImagePreprocessor
     {
         if (src.Empty()) throw new ArgumentException("Source image is empty.");
 
-        var width = (int)(src.Width * LeftHeaderWidthFraction);
-        var height = (int)(src.Height * LeftHeaderHeightFraction);
-        if (width < 100) width = Math.Min(src.Width, 100);
-        if (height < 60) height = Math.Min(src.Height, 60);
+        var (width, height) = ComputeLeftHeaderRect(src);
 
         var roi = new Rect(0, 0, width, height);
         var crop = new Mat(src, roi).Clone();
@@ -147,10 +188,7 @@ public static class ImagePreprocessor
     {
         if (src.Empty()) throw new ArgumentException("Source image is empty.");
 
-        var width = (int)(src.Width * LeftHeaderWidthFraction);
-        var height = (int)(src.Height * LeftHeaderHeightFraction);
-        if (width < 100) width = Math.Min(src.Width, 100);
-        if (height < 60) height = Math.Min(src.Height, 60);
+        var (width, height) = ComputeLeftHeaderRect(src);
 
         var roi = new Rect(0, 0, width, height);
         var crop = new Mat(src, roi).Clone();
@@ -192,6 +230,30 @@ public static class ImagePreprocessor
             band.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Compute the left-header crop rectangle (always anchored at the top-left
+    /// corner). Used by both the default and aggressive variants so they stay
+    /// in sync. Combines a relative <see cref="LeftHeaderHeightFraction"/>
+    /// with an absolute <see cref="LeftHeaderMinHeightPixels"/> floor: the
+    /// floor saves us on letterboxed-cropped captures (eg. 1753×690) where
+    /// the relative fraction alone leaves the terminal name on the bottom
+    /// edge of the crop. Output is clamped to <paramref name="src"/> bounds
+    /// so the caller can build a <see cref="Rect"/> safely.
+    /// </summary>
+    private static (int width, int height) ComputeLeftHeaderRect(Mat src)
+    {
+        var width = (int)(src.Width * LeftHeaderWidthFraction);
+        if (width < 100) width = 100;
+        if (width > src.Width) width = src.Width;
+
+        var fractionHeight = (int)(src.Height * LeftHeaderHeightFraction);
+        var height = Math.Max(fractionHeight, LeftHeaderMinHeightPixels);
+        if (height < 60) height = 60;
+        if (height > src.Height) height = src.Height;
+
+        return (width, height);
     }
 
     private static void ApplyClahe(Mat working)

@@ -21,6 +21,33 @@ public sealed class CommodityParser
         @"(?<num>\d[\d.,]+)\s*(?<unit>[KMkm])?\s*[\/\\1lI|]\s*[5Ss3][Cc][UuOo0]\b",
         RegexOptions.Compiled);
 
+    /// <summary>
+    /// Recognises an isolated "0 SCU"-shaped token where the leading 0 was
+    /// either kept as a digit OR misread as letter 'O' (very common — SC
+    /// renders the zero in a small font that PaddleOCR cannot disambiguate
+    /// from O on dark backgrounds). Accepts all four spellings:
+    /// <c>0 SCU</c>, <c>O SCU</c>, <c>0SCU</c>, <c>OSCU</c>, plus the
+    /// S↔5 OCR confusion (<c>05CU</c>, <c>O5CU</c>).
+    /// The standard <see cref="ScuRegex"/> requires a leading digit so it
+    /// silently drops the 'O'-prefixed variants and the row ends up with
+    /// no SCU value, which then prevents InferOutOfStockState from setting
+    /// SCU=0 unless the status detector also fired.
+    /// </summary>
+    private static readonly Regex IsolatedZeroScuRegex = new(
+        @"^[O0o]\s*[5Ss][Cc][UuOo0]\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Quick reject filter for the OUT-OF-STOCK fuzzy fallback: the line
+    /// must contain a "STOCK"-like token (with the K↔H OCR substitution
+    /// tolerated). Without this guard the fuzzy ratio check would be run
+    /// against every status line on the panel and could false-positive on
+    /// random commodity names sharing a few letters with "OUT OF STOCK".
+    /// </summary>
+    private static readonly Regex StockishRegex = new(
+        @"ST[O0]C[KH]?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private static readonly string[] UiStopWords =
     {
         "SHOP QUANTITY", "SHOP INVENTORY", "SHOP",
@@ -116,7 +143,7 @@ public sealed class CommodityParser
         BuildPriceRows(classified, submission);
         DedupeRows(submission);
         EnrichStatus(classified, submission);
-        InferOutOfStockScu(submission);
+        InferOutOfStockState(submission);
 
         AppendReviewFlags(submission);
 
@@ -141,6 +168,19 @@ public sealed class CommodityParser
             if (scu.Success && IsLineMostlyNumber(line))
             {
                 result[i] = new LineClassification(line, LineType.Scu, ScuValue: ParseScu(scu));
+                continue;
+            }
+
+            // Out-of-stock items render their quantity as a tiny "0 SCU"
+            // that PaddleOCR collapses into a single 4-character token —
+            // typically "OSCU" (zero misread as letter O) or "0SCU"
+            // (digit retained but space dropped). IsLineMostlyNumber
+            // would reject such short, mostly-letter tokens, so we
+            // catch them with an explicit pattern before falling
+            // through to the name-candidate branch.
+            if (IsolatedZeroScuRegex.IsMatch(line.Trim()))
+            {
+                result[i] = new LineClassification(line, LineType.Scu, ScuValue: 0);
                 continue;
             }
 
@@ -310,14 +350,31 @@ public sealed class CommodityParser
                 continue;
             }
 
+            var matchedByRegex = false;
             foreach (var (pattern, status) in StatusPatterns)
             {
                 if (pattern.IsMatch(c.OriginalLine))
                 {
                     lastStatus = status;
                     lastStatusLine = c.OriginalLine;
+                    matchedByRegex = true;
                     break;
                 }
+            }
+
+            // OUT-OF-STOCK fuzzy fallback. Real captures of out-of-stock
+            // rows produce variants the strict regex cannot handle —
+            // "OUT OF STOCH" (K→H), "QUT DE STOCK" (O→Q + OF→DE),
+            // "QUTAOF STOCK" (extra glyph), etc. — observed on
+            // People's Service Station Theta + several Pyro stations.
+            // Fuzzy matching is safe here because "OUT OF STOCK" is the
+            // ONLY status whose canonical phrase doesn't share a long
+            // suffix with another status (vs. the INVENTORY family
+            // which all share "INVENTORY" and would cross-match).
+            if (!matchedByRegex && LooksLikeOutOfStockFuzzy(c.OriginalLine))
+            {
+                lastStatus = InventoryStatus.OutOfStock;
+                lastStatusLine = c.OriginalLine;
             }
 
             if (!assignmentLocked
@@ -435,18 +492,32 @@ public sealed class CommodityParser
     }
 
     /// <summary>
-    /// When a commodity row has <c>StatusBuy == OutOfStock</c> and no SCU was
-    /// detected by OCR, set <c>ScuBuy = 0</c> automatically. This is not a
-    /// heuristic — "Out of Stock" is by definition 0 SCU. The OCR engine often
-    /// misses the isolated "0" character on a dark background, so the SCU field
-    /// stays null and the validator would otherwise flag it as a blocking error,
-    /// forcing the user to manually type "0" on every out-of-stock row.
+    /// Reconciles SCU and inventory-status fields on Out-of-Stock rows.
+    /// "Out of Stock" is by definition 0 SCU, so both fields imply each
+    /// other and the inference goes both ways:
     ///
-    /// Only applied when the status is <c>OutOfStock</c>. All other statuses
-    /// (Low, Medium, High, Maximum) can legitimately have ANY positive SCU
-    /// value, so we never infer for those.
+    ///   FORWARD  : <c>StatusBuy == OutOfStock &amp;&amp; ScuBuy is null</c>
+    ///              → <c>ScuBuy = 0</c>.
+    ///              SC renders OOS rows with a tiny "0" PaddleOCR often
+    ///              fails to read, so the field is left null even though
+    ///              the status was clearly detected.
+    ///
+    ///   REVERSE  : <c>ScuBuy == 0 &amp;&amp; StatusBuy == Unknown</c>
+    ///              → <c>StatusBuy = OutOfStock</c>.
+    ///              The opposite OCR failure: the "0 SCU" was read but
+    ///              the "OUT OF STOCK" header was either off-screen
+    ///              (Hydrogen at the bottom of the panel in
+    ///              terminal_screenshot-5.jpg) or so corrupted that
+    ///              even the fuzzy fallback in EnrichStatus did not
+    ///              fire. SCU=0 with no status only ever means OOS in
+    ///              the SC commodity terminal.
+    ///
+    /// Only acts when the destination field is empty/Unknown — never
+    /// overwrites a value the upstream stages already determined. Other
+    /// statuses (Low, Medium, High, Maximum) can legitimately carry ANY
+    /// positive SCU value so they never trigger either direction.
     /// </summary>
-    private static void InferOutOfStockScu(ParsedSubmission submission)
+    private static void InferOutOfStockState(ParsedSubmission submission)
     {
         foreach (var row in submission.Prices)
         {
@@ -455,7 +526,36 @@ public sealed class CommodityParser
                 row.ScuBuy = 0;
                 row.RawScu ??= "(inferred: OutOfStock → 0 SCU)";
             }
+            else if (row.ScuBuy == 0 && row.StatusBuy == InventoryStatus.Unknown)
+            {
+                row.StatusBuy = InventoryStatus.OutOfStock;
+                row.RawStatus ??= "(inferred: 0 SCU → OutOfStock)";
+            }
         }
+    }
+
+    /// <summary>
+    /// Tolerant fuzzy match for the "OUT OF STOCK" status header.
+    /// Returns true when <paramref name="line"/> is plausibly that
+    /// header even after typical OCR corruption.
+    ///
+    /// Three guards against false positives:
+    ///   1. Length window 10..20 — rules out the unrelated "IN STOCK"
+    ///      section header (8 chars) which would otherwise score high
+    ///      via PartialRatio on the shared "STOCK" substring.
+    ///   2. Must contain a "STOCK"-like token (with K↔H tolerance) —
+    ///      ensures the line is actually about stock state and not
+    ///      another short phrase that happens to fuzzy-score highly.
+    ///   3. WeightedRatio ≥ 70 against the canonical phrase — covers
+    ///      OCR errors of up to ~3 characters ("QUT DE STOCK" sits at
+    ///      this threshold; everything closer scores higher).
+    /// </summary>
+    private static bool LooksLikeOutOfStockFuzzy(string line)
+    {
+        var trimmed = line.Trim().ToUpperInvariant();
+        if (trimmed.Length is < 10 or > 20) return false;
+        if (!StockishRegex.IsMatch(trimmed)) return false;
+        return FuzzySharp.Fuzz.WeightedRatio(trimmed, "OUT OF STOCK") >= 70;
     }
 
     private static void AppendReviewFlags(ParsedSubmission submission)

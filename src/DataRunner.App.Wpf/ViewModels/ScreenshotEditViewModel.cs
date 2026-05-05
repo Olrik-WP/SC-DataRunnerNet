@@ -73,8 +73,18 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     [RelayCommand]
     private void ToggleSideBySide() => SideBySideScreenshot = !SideBySideScreenshot;
 
-    [ObservableProperty] private UexTerminal? _selectedTerminal;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelectedTerminal))]
+    private UexTerminal? _selectedTerminal;
     [ObservableProperty] private string _terminalSearch = "";
+
+    /// <summary>
+    /// True when a catalog terminal is bound to the form. Drives the
+    /// "Bound: ..." confirmation banner under the terminal search box so
+    /// the user can SEE which terminal id_terminal will carry without
+    /// inspecting the payload — fixes issue #3 point 4.
+    /// </summary>
+    public bool HasSelectedTerminal => SelectedTerminal is not null;
     [ObservableProperty] private bool _isTerminalDropDownOpen;
     [ObservableProperty] private TerminalTab _tab = TerminalTab.Buy;
     [ObservableProperty] private string _containerSizes = "";
@@ -84,6 +94,19 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     [ObservableProperty] private double _terminalMatchScore;
     [ObservableProperty] private string _terminalSourceField = "";
     [ObservableProperty] private string _terminalFromOcr = "";
+
+    /// <summary>
+    /// Source screenshot width / height in pixels, captured by the OCR
+    /// pipeline. 0 when unknown (eg. legacy submissions or text-only
+    /// fixtures). Used by <see cref="RecomputeValidation"/> to warn the
+    /// user when the image was resized to a non-standard aspect ratio
+    /// — small-glyph regions (terminal name in the LEFT panel) become
+    /// unreliable below ~800px height regardless of compression
+    /// settings, and that degradation is invisible without an explicit
+    /// hint.
+    /// </summary>
+    [ObservableProperty] private int _sourceImageWidth;
+    [ObservableProperty] private int _sourceImageHeight;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ReRunOcrCommand))]
@@ -226,7 +249,11 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         UserExplicitlyConfirmedTerminal = true;
 
         _suspendSearchSync = true;
-        TerminalSearch = value.DisplayName;
+        // Surface the FULL hierarchy (shop · station · system) in the search
+        // box so the user sees exactly which terminal is bound, not just the
+        // shared parent-station name. Critical for stations like Nyx Gateway
+        // where multiple sibling shops collapse to the same DisplayName.
+        TerminalSearch = value.RichDisplayName;
         _suspendSearchSync = false;
         IsTerminalDropDownOpen = false;
         RecomputeValidation();
@@ -258,6 +285,8 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     partial void OnTerminalMatchScoreChanged(double value) => RecomputeValidation();
     partial void OnUserExplicitlyConfirmedTerminalChanged(bool value) => RecomputeValidation();
     partial void OnIsAmbiguousTerminalChanged(bool value) => RecomputeValidation();
+    partial void OnSourceImageWidthChanged(int value) => RecomputeValidation();
+    partial void OnSourceImageHeightChanged(int value) => RecomputeValidation();
 
     /// <summary>
     /// Walks the current state and rebuilds the issue list. Cheap (sync, no I/O).
@@ -269,12 +298,38 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
 
         if (SelectedTerminal is null)
         {
-            ValidationIssues.Add(new LiveValidationIssue
+            // Distinguish "user hasn't typed anything yet" (default empty form)
+            // from "user typed text that didn't resolve to a unique terminal".
+            // The latter is the GitHub issue #3 pain point: the old generic
+            // error left the user staring at the API rejection
+            //   `id_terminal is required and must be a positive integer`
+            // with no clue what to do. Surface the candidate count instead.
+            var typed = (TerminalSearch ?? "").Trim();
+            if (typed.Length == 0)
             {
-                Severity = LiveValidationSeverity.Error,
-                Code = "terminal_missing",
-                Message = "No terminal picked. Select one in the TERMINAL field.",
-            });
+                ValidationIssues.Add(new LiveValidationIssue
+                {
+                    Severity = LiveValidationSeverity.Error,
+                    Code = "terminal_missing",
+                    Message = "No terminal picked. Type a name in the TERMINAL field and pick one from the dropdown.",
+                });
+            }
+            else
+            {
+                // Use the same matching logic as the dropdown so the count is
+                // consistent with what the user sees.
+                var candidateCount = CountCandidatesFor(typed);
+                ValidationIssues.Add(new LiveValidationIssue
+                {
+                    Severity = LiveValidationSeverity.Error,
+                    Code = "terminal_unresolved",
+                    Message = candidateCount switch
+                    {
+                        0 => $"\"{typed}\" doesn't match any terminal in the catalog. Try a shorter or different spelling — the dropdown searches shop name, station, outpost, city and star system.",
+                        _ => $"\"{typed}\" matches {candidateCount} terminals — pick one explicitly in the dropdown so the correct id_terminal is sent.",
+                    },
+                });
+            }
         }
         else
         {
@@ -289,7 +344,7 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
                 {
                     Severity = LiveValidationSeverity.Error,
                     Code = "terminal_ambiguous_unconfirmed",
-                    Message = $"\"{SelectedTerminal.DisplayName}\" exists in multiple star systems — pick the correct one in the dropdown to confirm.",
+                    Message = $"\"{SelectedTerminal.DisplayName}\" exists in multiple star systems — pick the correct one in the dropdown (currently: {SelectedTerminal.RichDisplayName}).",
                 });
             }
 
@@ -300,6 +355,30 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
                     Severity = LiveValidationSeverity.Warning,
                     Code = "terminal_low_match",
                     Message = $"Terminal OCR match is only {TerminalMatchScore:0}% — double-check the terminal name.",
+                });
+            }
+        }
+
+        // Image-quality warning: when the source screenshot has a
+        // non-standard aspect ratio (outside the 16:9..21:9 band) it has
+        // almost certainly been cropped or resized after capture. SC's
+        // commodity panel has fixed-relative-position UI elements and
+        // small-glyph areas (terminal name in the LEFT panel under
+        // YOUR INVENTORIES, status bands per row) become unreliable
+        // when the source pixel density drops below ~1080p-equivalent.
+        // Surfacing this as a Warning gives the user a heads-up to
+        // verify EVERY field before sending — without blocking the
+        // submission for users who knowingly work from edited captures.
+        if (SourceImageWidth > 0 && SourceImageHeight > 0)
+        {
+            var ratio = (double)SourceImageWidth / SourceImageHeight;
+            if (ratio is < 1.6 or > 2.4)
+            {
+                ValidationIssues.Add(new LiveValidationIssue
+                {
+                    Severity = LiveValidationSeverity.Warning,
+                    Code = "image_aspect_unusual",
+                    Message = $"Screenshot has an unusual aspect ratio ({SourceImageWidth}×{SourceImageHeight}, {ratio:0.00}:1) — looks resized or cropped. OCR confidence is degraded; verify every field carefully before sending.",
                 });
             }
         }
@@ -478,6 +557,8 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
             TerminalMatchScore = 0;
             TerminalSourceField = "";
             TerminalFromOcr = "";
+            SourceImageWidth = 0;
+            SourceImageHeight = 0;
         }
 
         UpdateTerminalSuggestions();
@@ -490,11 +571,13 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         TerminalMatchScore = s.TerminalMatchScore;
         TerminalSourceField = s.TerminalMatchedField ?? "";
         TerminalFromOcr = s.TerminalMatchedFromOcr ?? "";
+        SourceImageWidth = s.SourceImageWidth;
+        SourceImageHeight = s.SourceImageHeight;
 
         var resolved = s.IdTerminal is { } id ? _catalog.GetTerminal(id) : null;
         _suspendSearchSync = true;
         SelectedTerminal = resolved;
-        TerminalSearch = resolved?.DisplayName ?? "";
+        TerminalSearch = resolved?.RichDisplayName ?? "";
         _suspendSearchSync = false;
 
         foreach (var row in s.Prices)
@@ -518,33 +601,85 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         UpdateTerminalSuggestions();
         IsTerminalDropDownOpen = TerminalSuggestions.Count > 0;
 
-        // Clear the resolved terminal if the user fully edited the text
-        // (otherwise BuildPayload would silently send the previously-matched id).
+        // Smart name → id resolution: when the typed query unambiguously
+        // narrows the catalog down to a SINGLE terminal, treat it as a real
+        // user pick. This is what unblocks the workflow where the user types
+        // a fully-qualified label like "Platinum Bay - Nyx Gateway (Stanton)"
+        // and would otherwise hit the cryptic
+        //   `id_terminal is required and must be a positive integer`
+        // payload error because no dropdown click ever fired.
+        // We require ≥3 chars to avoid matching a random single token (e.g. "L1")
+        // that happens to be unique in the catalog by accident.
+        if (TerminalSuggestions.Count == 1
+            && value is { Length: >= 3 })
+        {
+            var match = TerminalSuggestions[0];
+            if (SelectedTerminal?.Id != match.Id)
+            {
+                _suspendSearchSync = true;
+                SelectedTerminal = match;
+                // Typing a string that resolves to exactly one terminal IS an
+                // explicit choice — no need to also open the dropdown and
+                // click the same item to lift the ambiguity gate.
+                UserExplicitlyConfirmedTerminal = true;
+                _suspendSearchSync = false;
+            }
+            return;
+        }
+
+        // Clear the resolved terminal if the user fully edited the text away
+        // from the previous pick (otherwise BuildPayload would silently send
+        // the previously-matched id). Compare against RichDisplayName since
+        // that is what we display in the box on a successful pick.
         if (SelectedTerminal is not null
+            && !string.Equals(SelectedTerminal.RichDisplayName, value, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(SelectedTerminal.DisplayName, value, StringComparison.OrdinalIgnoreCase))
         {
             _suspendSearchSync = true;
             SelectedTerminal = null;
             _suspendSearchSync = false;
         }
+
+        // Refresh the validation panel: when the user types text that does
+        // not resolve to any (or matches multiple) terminals, the
+        // `terminal_unresolved` message must reflect the current candidate
+        // count even though SelectedTerminal stayed null/unchanged.
+        RecomputeValidation();
     }
+
+    /// <summary>
+    /// Tokens used to split a free-form terminal query like
+    /// <c>"Platinum Bay - Nyx Gateway (Stanton)"</c> into matchable parts
+    /// (<c>Platinum</c>, <c>Bay</c>, <c>Nyx</c>, <c>Gateway</c>, <c>Stanton</c>).
+    /// Includes spaces, hyphens, mid-dots, slashes, parens and common
+    /// punctuation so the same query works whether the user copies a
+    /// canonical UEX label or just types loosely.
+    /// </summary>
+    private static readonly char[] TerminalQueryTokenSeparators =
+        { ' ', '\t', '-', '–', '—', '·', '/', '\\', '(', ')', '[', ']', ',', '.', ':', ';', '|' };
 
     private void UpdateTerminalSuggestions()
     {
         TerminalSuggestions.Clear();
 
         IEnumerable<UexTerminal> source = _catalog.CommodityTerminals;
-        if (!string.IsNullOrWhiteSpace(TerminalSearch))
+        var query = TerminalSearch?.Trim() ?? "";
+        if (query.Length > 0)
         {
-            var q = TerminalSearch.Trim();
-            source = source.Where(t =>
-                Contains(t.DisplayName, q) ||
-                Contains(t.Name, q) ||
-                Contains(t.Nickname, q) ||
-                Contains(t.Code, q) ||
-                Contains(t.SpaceStationName, q) ||
-                Contains(t.OutpostName, q) ||
-                Contains(t.CityName, q));
+            // Tokenized AND search: every non-trivial token must hit at least
+            // one searchable field. This is what lets users paste full canonical
+            // labels (`"Platinum Bay - Nyx Gateway (Stanton)"`), use loose
+            // ordering (`"stanton platinum nyx"`), or mix system + station.
+            // Single-letter tokens are dropped to avoid pathological matches.
+            var tokens = query
+                .Split(TerminalQueryTokenSeparators, StringSplitOptions.RemoveEmptyEntries)
+                .Where(t => t.Length >= 2)
+                .ToArray();
+
+            if (tokens.Length > 0)
+            {
+                source = source.Where(t => tokens.All(tok => MatchesAnyField(t, tok)));
+            }
         }
 
         // When the currently-selected terminal is ambiguous, ALWAYS surface every
@@ -555,7 +690,8 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         var pinnedIds = new HashSet<int>();
         if (IsAmbiguousTerminal && AmbiguousCandidates.Count > 0)
         {
-            foreach (var c in AmbiguousCandidates.OrderBy(t => t.StarSystemName))
+            foreach (var c in AmbiguousCandidates.OrderBy(t => t.StarSystemName)
+                                                 .ThenBy(t => t.RichDisplayName))
             {
                 pinned.Add(c);
                 pinnedIds.Add(c.Id);
@@ -571,8 +707,44 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Matches a single token (case-insensitive substring) against every
+    /// searchable field of a terminal: shop name, display name, nickname,
+    /// code, parent location (city / outpost / station / planet) and star
+    /// system. Star system is intentionally included so a user typing
+    /// <c>"stanton"</c> filters down to the right side of an ambiguous pair.
+    /// </summary>
+    private static bool MatchesAnyField(UexTerminal t, string token)
+        => Contains(t.DisplayName, token)
+        || Contains(t.Name, token)
+        || Contains(t.Nickname, token)
+        || Contains(t.Code, token)
+        || Contains(t.SpaceStationName, token)
+        || Contains(t.OutpostName, token)
+        || Contains(t.CityName, token)
+        || Contains(t.PlanetName, token)
+        || Contains(t.StarSystemName, token);
+
     private static bool Contains(string? s, string q)
         => s is not null && s.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0;
+
+    /// <summary>
+    /// Counts how many catalog terminals match a free-form query under the
+    /// SAME tokenizer/matching rules as <see cref="UpdateTerminalSuggestions"/>.
+    /// Used by validation to show the user a precise reason when their typed
+    /// text doesn't resolve to a unique terminal.
+    /// </summary>
+    private int CountCandidatesFor(string query)
+    {
+        var tokens = (query ?? "")
+            .Split(TerminalQueryTokenSeparators, StringSplitOptions.RemoveEmptyEntries)
+            .Where(t => t.Length >= 2)
+            .ToArray();
+        if (tokens.Length == 0) return 0;
+        return _catalog.CommodityTerminals
+            .Count(t => tokens.All(tok => MatchesAnyField(t, tok)));
+    }
+
 
     [RelayCommand]
     private void PickTerminal(UexTerminal? terminal)

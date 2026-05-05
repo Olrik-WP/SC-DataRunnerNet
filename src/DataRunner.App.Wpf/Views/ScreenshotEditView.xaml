@@ -196,11 +196,14 @@
                             <ui:TextBox x:Name="TerminalSearchBox"
                                         Text="{Binding TerminalSearch, UpdateSourceTrigger=PropertyChanged}"
                                         PlaceholderText="Search terminal by name, code, station, outpost…"
-                                        GotKeyboardFocus="TerminalSearchBox_GotKeyboardFocus" />
-                            <Popup IsOpen="{Binding IsTerminalDropDownOpen, Mode=TwoWay}"
+                                        GotKeyboardFocus="TerminalSearchBox_GotKeyboardFocus"
+                                        PreviewMouseLeftButtonDown="TerminalSearchBox_PreviewMouseLeftButtonDown"
+                                        PreviewKeyDown="TerminalSearchBox_PreviewKeyDown" />
+                            <Popup x:Name="TerminalSuggestionsPopup"
+                                   IsOpen="{Binding IsTerminalDropDownOpen, Mode=TwoWay}"
                                    PlacementTarget="{Binding ElementName=TerminalSearchBox}"
                                    Placement="Bottom"
-                                   StaysOpen="False"
+                                   StaysOpen="True"
                                    AllowsTransparency="True"
                                    PopupAnimation="Fade"
                                    Width="{Binding ActualWidth, ElementName=TerminalSearchBox}">
@@ -211,7 +214,8 @@
                                     <ListBox MaxHeight="280"
                                              ItemsSource="{Binding TerminalSuggestions}"
                                              Background="Transparent"
-                                             BorderThickness="0">
+                                             BorderThickness="0"
+                                             PreviewMouseWheel="TerminalSuggestionList_PreviewMouseWheel">
                                         <ListBox.ItemContainerStyle>
                                             <Style TargetType="ListBoxItem">
                                                 <Setter Property="Padding" Value="10,6" />
@@ -235,6 +239,39 @@
                                 </Border>
                             </Popup>
                         </Grid>
+
+                        <!-- Resolved-terminal confirmation. Visible whenever a
+                             terminal is actually bound to the form (so the
+                             user can SEE which one without inspecting the
+                             payload), with a green check + the canonical
+                             "Shop · Station · System" label. Critical for
+                             the auto-resolve path where the search box still
+                             shows the user's typed text rather than the
+                             canonical label. Resolves issue #3 point 4. -->
+                        <Border Margin="0,6,0,0" Padding="8,4"
+                                Background="#1F4CAF50" BorderBrush="#664CAF50"
+                                BorderThickness="1" CornerRadius="4">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasSelectedTerminal}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE73E;" FontFamily="Segoe MDL2 Assets"
+                                           FontSize="13" Margin="0,0,8,0"
+                                           Foreground="#4CAF50"
+                                           VerticalAlignment="Center" />
+                                <TextBlock TextWrapping="Wrap" FontSize="12">
+                                    <Run Text="Bound:" FontWeight="SemiBold" Foreground="#88FFFFFF" />
+                                    <Run Text="{Binding SelectedTerminal.RichDisplayName, Mode=OneWay, FallbackValue=''}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
 
                         <Grid Margin="0,10,0,0">
                             <Grid.ColumnDefinitions>
