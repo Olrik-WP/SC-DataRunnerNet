@@ -20,8 +20,32 @@ public interface IAppPreferences
     /// </summary>
     bool AttachScreenshotOnSubmit { get; set; }
 
-    /// <summary>Folder watched for incoming screenshots.</summary>
+    /// <summary>
+    /// LEGACY single-folder slot kept for backward compatibility with prefs
+    /// files written before LIVE/PTU were split into two slots. Reading this
+    /// property always returns <see cref="LiveScreenshotsFolder"/>; setting
+    /// it forwards the value to <see cref="LiveScreenshotsFolder"/> too.
+    ///
+    /// New code should use <see cref="LiveScreenshotsFolder"/> /
+    /// <see cref="PtuScreenshotsFolder"/> directly.
+    /// </summary>
     string? ScreenshotsFolder { get; set; }
+
+    /// <summary>
+    /// Folder Star Citizen writes LIVE-channel screenshots to. Files dropped
+    /// here are tagged with <see cref="DataRunner.Core.Models.GameBranch.Live"/>
+    /// and submitted to UEX with the current LIVE build number resolved from
+    /// /game_versions.
+    /// </summary>
+    string? LiveScreenshotsFolder { get; set; }
+
+    /// <summary>
+    /// Folder Star Citizen writes PTU-channel screenshots to. Optional — when
+    /// empty / not set, the watcher only monitors the LIVE slot. Files dropped
+    /// here are tagged with <see cref="DataRunner.Core.Models.GameBranch.Ptu"/>
+    /// and submitted with the current PTU build number from /game_versions.
+    /// </summary>
+    string? PtuScreenshotsFolder { get; set; }
 
     /// <summary>
     /// When true, the source .png file is deleted from disk immediately after a

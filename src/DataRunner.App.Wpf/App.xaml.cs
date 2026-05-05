@@ -189,6 +189,19 @@ public partial class App : Application
 
             var history = Host.Services.GetRequiredService<ISubmissionHistory>();
             await history.InitializeAsync();
+
+            // Pre-load the cached UEX game versions from disk so the editor
+            // can pre-fill the GAME VERSION field even if the first network
+            // /game_versions request hasn't landed yet (eg. user is offline).
+            var gameVersions = Host.Services.GetRequiredService<IGameVersionsService>();
+            await gameVersions.LoadFromDiskAsync();
+            // Fire-and-forget refresh in the background so subsequent loads
+            // see the latest UEX values without blocking startup.
+            _ = Task.Run(async () =>
+            {
+                try { await gameVersions.RefreshAsync(); }
+                catch { /* logged inside the service */ }
+            });
         }
         catch (Exception ex)
         {

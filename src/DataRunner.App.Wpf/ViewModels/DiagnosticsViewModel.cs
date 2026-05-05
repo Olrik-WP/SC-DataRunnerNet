@@ -211,7 +211,8 @@ public sealed partial class DiagnosticsViewModel : ObservableObject
             sb.AppendLine($"AttachScreenshot: {_prefs.AttachScreenshotOnSubmit}");
             sb.AppendLine($"DeleteAfterSubmit: {_prefs.DeleteScreenshotAfterSubmit}");
             sb.AppendLine($"DefaultProduction: {_prefs.DefaultIsProduction}");
-            sb.AppendLine($"ScreenshotsFolder: {_prefs.ScreenshotsFolder ?? "<not set>"}");
+            sb.AppendLine($"LiveScreenshotsFolder: {_prefs.LiveScreenshotsFolder ?? "<not set>"}");
+            sb.AppendLine($"PtuScreenshotsFolder:  {_prefs.PtuScreenshotsFolder ?? "<not set>"}");
             sb.AppendLine();
 
             // Last 5 submissions summary

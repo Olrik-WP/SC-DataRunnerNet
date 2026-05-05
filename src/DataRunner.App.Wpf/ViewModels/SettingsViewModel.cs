@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DataRunner.App.Services;
 using DataRunner.Core.Abstractions;
+using DataRunner.Core.Models;
 using Microsoft.Extensions.Logging;
 
 namespace DataRunner.App.ViewModels;
@@ -14,6 +15,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     private readonly IAppPreferences _prefs;
     private readonly IBuiltInAppTokenProvider _builtInToken;
     private readonly IDialogService _dialog;
+    private readonly IGameVersionsService _gameVersions;
     private readonly ILogger<SettingsViewModel> _logger;
 
     /// <summary>True when the build embeds a UEX app bearer token (official
@@ -50,20 +52,64 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _hasSecretKey;
     [ObservableProperty] private string _bearerTokenInput = "";
     [ObservableProperty] private bool _hasBearerToken;
-    [ObservableProperty] private string _screenshotsFolder = "";
+
+    /// <summary>
+    /// Star Citizen LIVE-channel screenshots folder. Files dropped here are
+    /// auto-imported and tagged <see cref="GameBranch.Live"/>; the resulting
+    /// /data_submit payload carries the current LIVE build number from
+    /// /game_versions in its <c>game_version</c> field.
+    /// </summary>
+    [ObservableProperty] private string _liveScreenshotsFolder = "";
+
+    /// <summary>
+    /// Optional PTU-channel screenshots folder. Files dropped here are
+    /// tagged <see cref="GameBranch.Ptu"/> and submitted with the current
+    /// PTU build number. Leave empty if you don't run PTU.
+    /// </summary>
+    [ObservableProperty] private string _ptuScreenshotsFolder = "";
+
+    /// <summary>
+    /// Back-compat alias: existing code (FirstRunWizard, InboxViewModel,
+    /// older watcher consumers) still references <c>ScreenshotsFolder</c>.
+    /// We forward it to the LIVE slot so nothing breaks while the views
+    /// migrate to the new properties.
+    /// </summary>
+    public string ScreenshotsFolder
+    {
+        get => LiveScreenshotsFolder;
+        set => LiveScreenshotsFolder = value;
+    }
+
     [ObservableProperty] private bool _useFluentMica = true;
     [ObservableProperty] private string _appLanguage = "en";
     [ObservableProperty] private string _catalogStatus = "loading...";
     [ObservableProperty] private bool _attachScreenshotOnSubmit = true;
     [ObservableProperty] private bool _deleteScreenshotAfterSubmit = true;
     [ObservableProperty] private bool _defaultIsProduction;
-    [ObservableProperty] private string _screenshotsFolderStatus = "";
-    [ObservableProperty] private bool _screenshotsFolderHasError;
+
+    [ObservableProperty] private string _liveScreenshotsFolderStatus = "";
+    [ObservableProperty] private bool _liveScreenshotsFolderHasError;
+    [ObservableProperty] private string _ptuScreenshotsFolderStatus = "";
+    [ObservableProperty] private bool _ptuScreenshotsFolderHasError;
+
+    /// <summary>
+    /// Read-only label shown next to the LIVE folder picker. Resolved at
+    /// runtime from the cached <see cref="IGameVersionsService"/> so the
+    /// user sees what <c>game_version</c> their submissions will carry.
+    /// </summary>
+    [ObservableProperty] private string _liveGameVersionLabel = "";
+
+    /// <summary>Same idea as <see cref="LiveGameVersionLabel"/>, for the PTU slot.</summary>
+    [ObservableProperty] private string _ptuGameVersionLabel = "";
 
     /// <summary>Severity name compatible with <c>SeverityToBrushConverter</c>.</summary>
-    public string ScreenshotsFolderSeverity => ScreenshotsFolderHasError ? "Warning" : "Ok";
+    public string LiveScreenshotsFolderSeverity => LiveScreenshotsFolderHasError ? "Warning" : "Ok";
+    public string PtuScreenshotsFolderSeverity => PtuScreenshotsFolderHasError ? "Warning" : "Ok";
 
-    partial void OnScreenshotsFolderHasErrorChanged(bool value) => OnPropertyChanged(nameof(ScreenshotsFolderSeverity));
+    partial void OnLiveScreenshotsFolderHasErrorChanged(bool value)
+        => OnPropertyChanged(nameof(LiveScreenshotsFolderSeverity));
+    partial void OnPtuScreenshotsFolderHasErrorChanged(bool value)
+        => OnPropertyChanged(nameof(PtuScreenshotsFolderSeverity));
 
     /// <summary>
     /// Placeholder shown inside the secret-key PasswordBox. Differs depending on
@@ -105,16 +151,32 @@ public sealed partial class SettingsViewModel : ObservableObject
         _ = SavePrefsAsync("default-is-production");
     }
 
-    partial void OnScreenshotsFolderChanged(string value)
+    partial void OnLiveScreenshotsFolderChanged(string value)
+    {
+        // Forward the back-compat alias too so listeners bound to
+        // ScreenshotsFolder (e.g. older watcher code paths) still react.
+        OnPropertyChanged(nameof(ScreenshotsFolder));
+
+        if (_isHydrating)
+        {
+            UpdateLiveStatus(value);
+            return;
+        }
+        _prefs.LiveScreenshotsFolder = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        UpdateLiveStatus(value);
+        _ = SavePrefsAsync("live-screenshots-folder");
+    }
+
+    partial void OnPtuScreenshotsFolderChanged(string value)
     {
         if (_isHydrating)
         {
-            UpdateScreenshotsFolderStatus(value);
+            UpdatePtuStatus(value);
             return;
         }
-        _prefs.ScreenshotsFolder = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        UpdateScreenshotsFolderStatus(value);
-        _ = SavePrefsAsync("screenshots-folder");
+        _prefs.PtuScreenshotsFolder = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        UpdatePtuStatus(value);
+        _ = SavePrefsAsync("ptu-screenshots-folder");
     }
 
     /// <summary>Awaited save with logging + UI feedback. Replaces the previous fire-and-forget pattern that swallowed errors.</summary>
@@ -123,34 +185,64 @@ public sealed partial class SettingsViewModel : ObservableObject
         try
         {
             await _prefs.SaveAsync().ConfigureAwait(true);
-            _logger.LogInformation("Preferences saved (trigger={Field}, screenshotsFolder={Folder}).",
-                field, _prefs.ScreenshotsFolder ?? "<null>");
+            _logger.LogInformation(
+                "Preferences saved (trigger={Field}, live={Live}, ptu={Ptu}).",
+                field,
+                _prefs.LiveScreenshotsFolder ?? "<null>",
+                _prefs.PtuScreenshotsFolder ?? "<null>");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to save preferences (trigger={Field}).", field);
-            ScreenshotsFolderStatus = $"Save failed: {ex.Message}";
-            ScreenshotsFolderHasError = true;
+            LiveScreenshotsFolderStatus = $"Save failed: {ex.Message}";
+            LiveScreenshotsFolderHasError = true;
         }
     }
 
-    private void UpdateScreenshotsFolderStatus(string value)
+    private void UpdateLiveStatus(string value)
+        => UpdateFolderStatus(value, isLive: true,
+            absent: "No LIVE folder configured — auto-import disabled for LIVE screenshots.",
+            ok: "Watching this folder for new LIVE screenshots.");
+
+    private void UpdatePtuStatus(string value)
+        => UpdateFolderStatus(value, isLive: false,
+            absent: "No PTU folder configured (optional — leave empty if you don't run PTU).",
+            ok: "Watching this folder for new PTU screenshots.");
+
+    private void UpdateFolderStatus(string value, bool isLive, string absent, string ok)
     {
+        string status; bool hasError;
         if (string.IsNullOrWhiteSpace(value))
         {
-            ScreenshotsFolderStatus = "No folder configured — auto-import disabled.";
-            ScreenshotsFolderHasError = true;
-            return;
+            status = absent;
+            // Empty PTU folder is NOT an error (it's optional); empty LIVE is.
+            hasError = isLive;
         }
-        var trimmed = value.Trim();
-        if (!Directory.Exists(trimmed))
+        else
         {
-            ScreenshotsFolderStatus = $"Folder does not exist: {trimmed}";
-            ScreenshotsFolderHasError = true;
-            return;
+            var trimmed = value.Trim();
+            if (!Directory.Exists(trimmed))
+            {
+                status = $"Folder does not exist: {trimmed}";
+                hasError = true;
+            }
+            else
+            {
+                status = ok;
+                hasError = false;
+            }
         }
-        ScreenshotsFolderStatus = "Watching this folder for new screenshots.";
-        ScreenshotsFolderHasError = false;
+
+        if (isLive)
+        {
+            LiveScreenshotsFolderStatus = status;
+            LiveScreenshotsFolderHasError = hasError;
+        }
+        else
+        {
+            PtuScreenshotsFolderStatus = status;
+            PtuScreenshotsFolderHasError = hasError;
+        }
     }
 
     public SettingsViewModel(
@@ -159,6 +251,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         IAppPreferences prefs,
         IBuiltInAppTokenProvider builtInToken,
         IDialogService dialog,
+        IGameVersionsService gameVersions,
         UpdateViewModel updates,
         ILogger<SettingsViewModel> logger)
     {
@@ -167,6 +260,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _prefs = prefs;
         _builtInToken = builtInToken;
         _dialog = dialog;
+        _gameVersions = gameVersions;
         _logger = logger;
         Updates = updates;
 
@@ -182,11 +276,15 @@ public sealed partial class SettingsViewModel : ObservableObject
             AttachScreenshotOnSubmit = _prefs.AttachScreenshotOnSubmit;
             DeleteScreenshotAfterSubmit = _prefs.DeleteScreenshotAfterSubmit;
             DefaultIsProduction = _prefs.DefaultIsProduction;
-            ScreenshotsFolder = _prefs.ScreenshotsFolder ?? DefaultScreenshotsFolder();
-            UpdateScreenshotsFolderStatus(ScreenshotsFolder);
+            LiveScreenshotsFolder = _prefs.LiveScreenshotsFolder ?? DefaultScreenshotsFolder(GameBranch.Live);
+            PtuScreenshotsFolder = _prefs.PtuScreenshotsFolder ?? DefaultScreenshotsFolder(GameBranch.Ptu);
+            UpdateLiveStatus(LiveScreenshotsFolder);
+            UpdatePtuStatus(PtuScreenshotsFolder);
+            UpdateGameVersionLabels();
             _logger.LogInformation(
-                "SettingsViewModel hydrated: prefs.ScreenshotsFolder={Pref}, UI={Ui}",
-                _prefs.ScreenshotsFolder ?? "<null>", ScreenshotsFolder);
+                "SettingsViewModel hydrated: live={Live}, ptu={Ptu}",
+                _prefs.LiveScreenshotsFolder ?? "<null>",
+                _prefs.PtuScreenshotsFolder ?? "<null>");
         }
         finally
         {
@@ -194,28 +292,88 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
-    private void BrowseScreenshotsFolder()
+    /// <summary>
+    /// Refreshes the per-folder labels showing what <c>game_version</c> string
+    /// each slot will send. Re-called whenever the user picks a new folder
+    /// or after a successful /game_versions fetch.
+    /// </summary>
+    public void UpdateGameVersionLabels()
     {
+        var c = _gameVersions.Cached;
+        var live = string.IsNullOrWhiteSpace(c?.Live) ? "LIVE (literal — UEX will use its current LIVE build)" : c!.Live!;
+        var ptu = string.IsNullOrWhiteSpace(c?.Ptu)
+            ? "PTU (no current build — UEX may reject the report until PTU re-opens)"
+            : c!.Ptu!;
+        LiveGameVersionLabel = $"Submissions tag: game_version = \"{live}\"";
+        PtuGameVersionLabel = $"Submissions tag: game_version = \"{ptu}\"";
+    }
+
+    [RelayCommand]
+    private void BrowseLiveScreenshotsFolder()
+        => BrowseFolder(GameBranch.Live);
+
+    [RelayCommand]
+    private void BrowsePtuScreenshotsFolder()
+        => BrowseFolder(GameBranch.Ptu);
+
+    private void BrowseFolder(GameBranch branch)
+    {
+        var current = branch == GameBranch.Live ? LiveScreenshotsFolder : PtuScreenshotsFolder;
         var dlg = new Microsoft.Win32.OpenFolderDialog
         {
-            Title = "Pick the folder Star Citizen writes screenshots to (Print Screen)",
-            InitialDirectory = !string.IsNullOrWhiteSpace(ScreenshotsFolder) && Directory.Exists(ScreenshotsFolder)
-                ? ScreenshotsFolder
+            Title = branch == GameBranch.Live
+                ? "Pick the LIVE Star Citizen screenshots folder (...\\StarCitizen\\LIVE\\Screenshots)"
+                : "Pick the PTU Star Citizen screenshots folder (...\\StarCitizen\\PTU\\Screenshots)",
+            InitialDirectory = !string.IsNullOrWhiteSpace(current) && Directory.Exists(current)
+                ? current
                 : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
         if (dlg.ShowDialog() == true)
         {
-            ScreenshotsFolder = dlg.FolderName;
+            if (branch == GameBranch.Live) LiveScreenshotsFolder = dlg.FolderName;
+            else PtuScreenshotsFolder = dlg.FolderName;
         }
     }
 
-    private static string DefaultScreenshotsFolder()
+    /// <summary>
+    /// Probes the standard Star Citizen install layouts for a Screenshots
+    /// folder matching the given branch. Returns the first one that exists,
+    /// or empty when none is found (the user will have to Browse manually).
+    /// </summary>
+    private static string DefaultScreenshotsFolder(GameBranch branch)
     {
-        var roberts = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "Pictures", "Roberts Space Industries", "ScreenShots");
-        return Directory.Exists(roberts) ? roberts : "";
+        var subfolder = branch == GameBranch.Ptu ? "PTU" : "LIVE";
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+        // The Roberts Space Industries pictures folder is shared across
+        // branches so we only return it for LIVE — it's the historical default
+        // and the most likely starting point on a fresh install.
+        if (branch == GameBranch.Live)
+        {
+            var roberts = Path.Combine(userProfile, "Pictures", "Roberts Space Industries", "ScreenShots");
+            if (Directory.Exists(roberts)) return roberts;
+        }
+
+        // Per-branch install probes: D:\StarCitizen\{LIVE|PTU}\Screenshots,
+        // D:\Program Files\Roberts Space Industries\StarCitizen\..., etc.
+        foreach (var drive in DriveInfo.GetDrives())
+        {
+            if (drive.DriveType != System.IO.DriveType.Fixed || !drive.IsReady) continue;
+            var root = drive.RootDirectory.FullName;
+            string[] candidates =
+            [
+                Path.Combine(root, "StarCitizen", subfolder, "Screenshots"),
+                Path.Combine(root, "Program Files", "Roberts Space Industries", "StarCitizen", subfolder, "Screenshots"),
+                Path.Combine(root, "Jeux", "StarCitizen", subfolder, "Screenshots"),
+                Path.Combine(root, "Games", "StarCitizen", subfolder, "Screenshots"),
+            ];
+            foreach (var c in candidates)
+            {
+                if (Directory.Exists(c)) return c;
+            }
+        }
+
+        return "";
     }
 
     private string BuildCatalogStatus()
@@ -244,13 +402,25 @@ public sealed partial class SettingsViewModel : ObservableObject
             DeleteScreenshotAfterSubmit = _prefs.DeleteScreenshotAfterSubmit;
             DefaultIsProduction = _prefs.DefaultIsProduction;
 
-            var freshFolder = _prefs.ScreenshotsFolder ?? DefaultScreenshotsFolder();
-            if (!string.Equals(ScreenshotsFolder, freshFolder, StringComparison.OrdinalIgnoreCase))
+            var freshLive = _prefs.LiveScreenshotsFolder ?? DefaultScreenshotsFolder(GameBranch.Live);
+            if (!string.Equals(LiveScreenshotsFolder, freshLive, StringComparison.OrdinalIgnoreCase))
             {
                 _isHydrating = false;
-                ScreenshotsFolder = freshFolder;
+                LiveScreenshotsFolder = freshLive;
+                _isHydrating = true;
             }
-            UpdateScreenshotsFolderStatus(ScreenshotsFolder);
+
+            var freshPtu = _prefs.PtuScreenshotsFolder ?? DefaultScreenshotsFolder(GameBranch.Ptu);
+            if (!string.Equals(PtuScreenshotsFolder, freshPtu, StringComparison.OrdinalIgnoreCase))
+            {
+                _isHydrating = false;
+                PtuScreenshotsFolder = freshPtu;
+                _isHydrating = true;
+            }
+
+            UpdateLiveStatus(LiveScreenshotsFolder);
+            UpdatePtuStatus(PtuScreenshotsFolder);
+            UpdateGameVersionLabels();
         }
         finally
         {
@@ -322,6 +492,22 @@ public sealed partial class SettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _dialog.ShowError("Catalog refresh failed", ex.Message);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RefreshGameVersionsAsync()
+    {
+        try
+        {
+            var versions = await _gameVersions.RefreshAsync();
+            UpdateGameVersionLabels();
+            _dialog.ShowInfo("Game versions refreshed",
+                $"UEX is currently using:\n  LIVE = {versions.Live ?? "<not set>"}\n  PTU  = {versions.Ptu ?? "<no current PTU build>"}");
+        }
+        catch (Exception ex)
+        {
+            _dialog.ShowError("Game versions refresh failed", ex.Message);
         }
     }
 

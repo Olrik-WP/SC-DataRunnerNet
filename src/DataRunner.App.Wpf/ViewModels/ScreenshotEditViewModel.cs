@@ -28,6 +28,7 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     private readonly ISubmissionHistory _history;
     private readonly IAppPreferences _prefs;
     private readonly IDialogService _dialog;
+    private readonly IGameVersionsService _gameVersions;
     private readonly OcrCoordinator _ocr;
     private readonly ILogger<ScreenshotEditViewModel> _logger;
 
@@ -90,6 +91,42 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     [ObservableProperty] private string _containerSizes = "";
     [ObservableProperty] private string _gameVersion = "";
     [ObservableProperty] private string _details = "";
+
+    /// <summary>
+    /// Star Citizen game branch the screenshot was taken from, derived from
+    /// the watcher slot (LIVE folder vs PTU folder). Auto-resolves the
+    /// matching <c>game_version</c> string (e.g. "4.7.2" or "4.8.0") via
+    /// <see cref="IGameVersionsService"/> when the user hasn't typed a
+    /// custom value in the GAME VERSION field.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BranchLabel))]
+    [NotifyPropertyChangedFor(nameof(IsPtuBranch))]
+    private GameBranch _branch = GameBranch.Live;
+
+    /// <summary>True for PTU screenshots; the editor surfaces a small banner
+    /// noting that UEX may temporarily reject PTU reports.</summary>
+    public bool IsPtuBranch => Branch == GameBranch.Ptu;
+
+    /// <summary>
+    /// Read-only label shown next to the GAME VERSION input. Tells the user
+    /// which branch the screenshot was tagged with by the watcher and what
+    /// resolved <c>game_version</c> string the payload will carry by default.
+    /// Updated whenever <see cref="Branch"/> changes or after a /game_versions
+    /// fetch lands.
+    /// </summary>
+    public string BranchLabel
+    {
+        get
+        {
+            var c = _gameVersions?.Cached;
+            var resolved = Branch == GameBranch.Ptu
+                ? (string.IsNullOrWhiteSpace(c?.Ptu) ? "PTU" : c!.Ptu!)
+                : (string.IsNullOrWhiteSpace(c?.Live) ? "LIVE" : c!.Live!);
+            var branchName = Branch == GameBranch.Ptu ? "PTU" : "LIVE";
+            return $"{branchName} screenshot · auto-fills game_version with \"{resolved}\" (override below to change)";
+        }
+    }
 
     [ObservableProperty] private double _terminalMatchScore;
     [ObservableProperty] private string _terminalSourceField = "";
@@ -176,6 +213,7 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         ISubmissionHistory history,
         IAppPreferences prefs,
         IDialogService dialog,
+        IGameVersionsService gameVersions,
         OcrCoordinator ocr,
         ILogger<ScreenshotEditViewModel> logger)
     {
@@ -186,6 +224,7 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         _history = history;
         _prefs = prefs;
         _dialog = dialog;
+        _gameVersions = gameVersions;
         _ocr = ocr;
         _logger = logger;
 
@@ -504,6 +543,43 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     /// </summary>
     private bool CanSubmit() => !HasBlockingErrors || UserOverrideValidation;
 
+    /// <summary>
+    /// Pre-fills the <see cref="GameVersion"/> field with the build number
+    /// returned by /game_versions for the current <see cref="Branch"/>.
+    /// Skips when the user has typed something already so we never clobber
+    /// a manual override, even after a fresh OCR run on the same item.
+    /// Refreshes the <see cref="BranchLabel"/> at the end so the read-only
+    /// indicator next to the field matches what was assigned.
+    /// </summary>
+    private async Task ResolveAndAssignGameVersionAsync()
+    {
+        try
+        {
+            // Don't override a value the user typed (or that came back from
+            // a previous load). The intent is a "smart default", not a
+            // canonicaliser.
+            if (!string.IsNullOrWhiteSpace(GameVersion))
+            {
+                OnPropertyChanged(nameof(BranchLabel));
+                return;
+            }
+
+            var resolved = await _gameVersions.ResolveAsync(Branch).ConfigureAwait(true);
+            if (!string.IsNullOrWhiteSpace(resolved))
+            {
+                GameVersion = resolved!;
+            }
+            // Always refresh the branch label even when resolution failed,
+            // so the user sees the literal "LIVE"/"PTU" fallback or a
+            // friendly "no PTU build" hint.
+            OnPropertyChanged(nameof(BranchLabel));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not pre-fill game_version for branch={Branch}", Branch);
+        }
+    }
+
     public void Load(InboxItem item)
     {
         _bound = item;
@@ -524,6 +600,14 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         // it on every load so the editor reflects the current global value
         // and the confirm dialog displays the right mode badge.
         IsProduction = _prefs.DefaultIsProduction;
+        // Inherit the branch from the inbox item (set by the watcher slot the
+        // screenshot was picked up from). Pre-fill the GAME VERSION field with
+        // the resolved build number from /game_versions so the user sees the
+        // exact value that will be sent and can override if they want.
+        Branch = item.Branch;
+        // Fire the resolution best-effort: if the cache misses we still hold
+        // a sensible literal ("LIVE" / "PTU") via Resolve()'s fallback path.
+        _ = ResolveAndAssignGameVersionAsync();
         SourceImagePath = item.ImagePath;
         try
         {
@@ -573,6 +657,10 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         TerminalFromOcr = s.TerminalMatchedFromOcr ?? "";
         SourceImageWidth = s.SourceImageWidth;
         SourceImageHeight = s.SourceImageHeight;
+        // Branch may also have been populated by the OCR pipeline on the
+        // ParsedSubmission directly (defensive — the watcher already set it
+        // on the InboxItem in Load above); honour it when present.
+        if (s.Branch != Branch) Branch = s.Branch;
 
         var resolved = s.IdTerminal is { } id ? _catalog.GetTerminal(id) : null;
         _suspendSearchSync = true;
@@ -809,6 +897,7 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
             UexApiClient.SerialiseWirePayload(payload))
         {
             IsProduction = _prefs.DefaultIsProduction,
+            Branch = Branch,
         };
 
         var confirmed = await _dialog.ShowConfirmSubmitAsync(confirmVm);
@@ -991,7 +1080,14 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
                 "Wait a bit before resending or change at least one value.",
 
             "ptu_reports_not_allowed" =>
-                "PTU reports are currently disabled by the server. Make sure 'Game Version' is a LIVE version.",
+                "UEX has temporarily disabled PTU reports — this typically happens during patch transitions when the PTU build is too unstable to feed public prices. " +
+                "Your submission has been kept in the local History so you can resubmit it once UEX re-opens PTU. " +
+                "If you submitted by mistake (this screenshot is actually from LIVE), open the editor's 'Optional metadata' panel and change the GAME VERSION to the LIVE build, then resend.",
+
+            "invalid_game_version" =>
+                "UEX rejected the GAME VERSION value. Allowed values are the current LIVE or PTU build numbers from " +
+                "https://api.uexcorp.space/2.0/game_versions (e.g. \"4.7.2\" or \"4.8.0\"), or the literal strings \"LIVE\" / \"PTU\". " +
+                "Open Settings → Screenshots folders → 'Refresh versions' to fetch the latest values, then resend.",
 
             "max_rows_exceeded" =>
                 "Too many commodity rows in this submission (UEX limit is 500). Split into smaller batches.",

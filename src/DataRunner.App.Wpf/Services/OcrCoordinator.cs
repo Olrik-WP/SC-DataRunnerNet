@@ -3,6 +3,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DataRunner.App.ViewModels;
 using DataRunner.Core.Abstractions;
+using DataRunner.Core.Models;
 using Microsoft.Extensions.Logging;
 
 namespace DataRunner.App.Services;
@@ -52,8 +53,15 @@ public sealed partial class OcrCoordinator : ObservableObject
     /// <summary>
     /// Queues a new image for OCR. Idempotent: if the same image path is already
     /// in the inbox, returns the existing item instead of duplicating it.
+    ///
+    /// <paramref name="branch"/> tags the resulting <see cref="InboxItem"/> with
+    /// the Star Citizen build channel the file came from (LIVE folder vs PTU
+    /// folder). The watcher passes the branch matching its slot; manual imports
+    /// default to <see cref="GameBranch.Live"/> since the user is typically
+    /// running on LIVE — they can override the resolved <c>game_version</c>
+    /// later in the editor's "Optional metadata" panel.
     /// </summary>
-    public InboxItem EnqueueAndProcess(string imagePath)
+    public InboxItem EnqueueAndProcess(string imagePath, GameBranch branch = GameBranch.Live)
     {
         var existing = _inbox.Items.FirstOrDefault(
             i => string.Equals(i.ImagePath, imagePath, StringComparison.OrdinalIgnoreCase));
@@ -67,6 +75,7 @@ public sealed partial class OcrCoordinator : ObservableObject
             StatusReason = "Waiting for OCR…",
             AddedAt = DateTimeOffset.Now,
             SourcePaths = new() { imagePath },
+            Branch = branch,
         };
         InvokeOnUi(() => _inbox.Items.Add(item));
         _ = ProcessAsync(item);
@@ -119,6 +128,10 @@ public sealed partial class OcrCoordinator : ObservableObject
             {
                 item.Submission = result.Submission;
                 item.Payload = result.Payload;
+                // Tag the parsed submission with the watcher-resolved branch
+                // so downstream code (editor → payload builder) doesn't need
+                // to ask the inbox item back for it.
+                if (item.Submission is not null) item.Submission.Branch = item.Branch;
                 // Show "Display Name · Star System" so the user can disambiguate
                 // multi-system terminals (Pyro Gateway, ARC-L1, etc.) at a glance
                 // even from the inbox card before opening the editor.

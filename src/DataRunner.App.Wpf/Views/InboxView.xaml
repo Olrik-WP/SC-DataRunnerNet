@@ -260,12 +260,47 @@
                                         </Border>
                                     </StackPanel>
 
-                                    <!-- Text block: name, terminal · system, status + count + age, reason. -->
+                                    <!-- Text block: name + branch pill, terminal · system, status + count + age, reason. -->
                                     <StackPanel Grid.Column="1" VerticalAlignment="Top">
-                                        <TextBlock Text="{Binding DisplayName}"
-                                                   FontWeight="SemiBold"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   ToolTip="{Binding ImagePath}" />
+                                        <DockPanel>
+                                            <!-- Branch pill: green LIVE / orange PTU. Tells the user
+                                                 at a glance which folder the screenshot was picked
+                                                 up from (and therefore which game_version will be
+                                                 sent to UEX). Hidden for LIVE on small/dense lists
+                                                 would be nicer, but at this size the colour cue is
+                                                 worth keeping for both. -->
+                                            <Border DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                                    CornerRadius="3" Padding="4,1" Margin="6,0,0,0"
+                                                    VerticalAlignment="Top">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="#1FA34A" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsPtu}" Value="True">
+                                                                <Setter Property="Background" Value="#D97706" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <TextBlock FontSize="9" FontWeight="SemiBold"
+                                                           Foreground="White">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Text" Value="LIVE" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsPtu}" Value="True">
+                                                                    <Setter Property="Text" Value="PTU" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Border>
+                                            <TextBlock Text="{Binding DisplayName}"
+                                                       FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding ImagePath}" />
+                                        </DockPanel>
                                         <TextBlock Text="{Binding TerminalLabel}"
                                                    FontSize="11" Opacity="0.8"
                                                    TextTrimming="CharacterEllipsis"

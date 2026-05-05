@@ -102,6 +102,28 @@ public sealed class UexApiClient : IUexApiClient
         return env!.Data;
     }
 
+    public async Task<UexGameVersions> GetGameVersionsAsync(CancellationToken ct = default)
+    {
+        // /game_versions wraps a SINGLE object, not a list. The shared
+        // UexEnvelope<T> is built around `data: T[]` so we use a dedicated
+        // envelope shape here.
+        var url = $"{BaseUrl}game_versions";
+        var env = await _http.GetFromJsonAsync<GameVersionsEnvelope>(url, ReadJson, ct);
+        if (env is null)
+            throw new InvalidOperationException($"UEX returned an empty body for {url}.");
+        if (!string.Equals(env.Status, "ok", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"UEX returned status='{env.Status}' for {url}: {env.Message}");
+        return env.Data ?? new UexGameVersions();
+    }
+
+    private sealed class GameVersionsEnvelope
+    {
+        public string? Status { get; set; }
+        public string? Message { get; set; }
+        public UexGameVersions? Data { get; set; }
+    }
+
     public async Task<UexSubmitResult> SubmitDataAsync(UexDataSubmitPayload payload, CancellationToken ct = default)
     {
         // UEX requires BOTH credentials on every /data_submit POST:

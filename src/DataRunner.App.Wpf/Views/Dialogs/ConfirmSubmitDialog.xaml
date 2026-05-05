@@ -154,24 +154,45 @@
                               ToolTip="The validator may be wrong (e.g. a previous attempt failed but was logged locally). Use this to force-send anyway and let UEX decide."
                               Content="Override BLOCK and send anyway (UEX will be the final judge)"
                               Visibility="{Binding HasBlockingIssues, Converter={StaticResource BoolToVisibility}}" />
-                    <!-- Mode badge (TEST / PRODUCTION). Read-only here; the toggle
-                         lives in Settings to prevent accidental per-screenshot flipping. -->
-                    <Border Margin="0,8,0,0" Padding="8,3" CornerRadius="3"
-                            HorizontalAlignment="Left">
-                        <Border.Style>
-                            <Style TargetType="Border">
-                                <Setter Property="Background" Value="#22DAA520" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsProduction}" Value="True">
-                                        <Setter Property="Background" Value="#33C8504F" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Border.Style>
-                        <TextBlock FontSize="11" FontWeight="SemiBold">
-                            <Run Text="Mode: " /><Run Text="{Binding ModeLabel, Mode=OneWay}" />
-                        </TextBlock>
-                    </Border>
+                    <!-- Pills: Mode (TEST / PRODUCTION — is_production flag) +
+                         Branch (LIVE / PTU — game_version flag). Both are
+                         read-only here; Mode is governed by Settings, Branch
+                         by the watcher slot the file came from. -->
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <Border Padding="8,3" CornerRadius="3" Margin="0,0,6,0">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="#22DAA520" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsProduction}" Value="True">
+                                            <Setter Property="Background" Value="#33C8504F" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <TextBlock FontSize="11" FontWeight="SemiBold">
+                                <Run Text="Mode: " /><Run Text="{Binding ModeLabel, Mode=OneWay}" />
+                            </TextBlock>
+                        </Border>
+                        <Border Padding="8,3" CornerRadius="3">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="#221FA34A" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsPtuBranch}" Value="True">
+                                            <Setter Property="Background" Value="#33D97706" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <TextBlock FontSize="11" FontWeight="SemiBold">
+                                <Run Text="Branch: " /><Run Text="{Binding BranchLabel, Mode=OneWay}" />
+                            </TextBlock>
+                        </Border>
+                    </StackPanel>
+                    <TextBlock Margin="0,4,0,0" Opacity="0.65" FontSize="10" TextWrapping="Wrap"
+                               Visibility="{Binding IsPtuBranch, Converter={StaticResource BoolToVisibility}}"
+                               Text="UEX may temporarily reject PTU reports during patch transitions (ptu_reports_not_allowed). Your submission is always kept in the local History either way." />
                 </StackPanel>
 
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">

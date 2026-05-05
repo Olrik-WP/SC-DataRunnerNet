@@ -200,42 +200,115 @@
                               IsChecked="{Binding DefaultIsProduction, Mode=TwoWay}"
                               Content="Send submissions in PRODUCTION mode (is_production = 1)" />
                     <TextBlock TextWrapping="Wrap" Opacity="0.75" FontSize="11" Margin="22,0,0,0"
-                               Text="When enabled (default), submissions go LIVE on UEX and update prices for everyone — this is the normal datarunner mode. Disable to send everything as TEST instead (recorded by UEX but not live), useful for debugging or when you're not sure of your data." />
+                               Text="When enabled (default), reports go live on UEX and update the public commodity prices everyone uses for trade routes — this is the standard datarunner mode. Disable to send everything as TEST instead: UEX still receives the data and you can review it in your account, but it won't affect public prices. Useful for debugging or when you're unsure of your OCR results." />
+                    <TextBlock TextWrapping="Wrap" Opacity="0.65" FontSize="11" Margin="22,4,0,0"
+                               FontStyle="Italic"
+                               Text="Independent of LIVE/PTU game build: this flag controls how UEX uses your report. The game build (game_version) is auto-detected from the source folder — see Screenshots folders below." />
                 </StackPanel>
             </ui:Card>
 
-            <!-- SCREENSHOTS FOLDER -->
+            <!-- SCREENSHOTS FOLDERS (LIVE + PTU) -->
             <ui:Card Padding="22,18" Margin="0,0,0,16">
                 <StackPanel>
                     <DockPanel>
                         <ui:SymbolIcon Symbol="Folder24" />
-                        <TextBlock Text="Screenshots folder"
+                        <TextBlock Text="Screenshots folders"
                                    FontSize="16" FontWeight="SemiBold"
                                    Margin="10,0,0,0" VerticalAlignment="Center" />
-                    </DockPanel>
-                    <TextBlock Margin="0,8,0,8" Opacity="0.75"
-                               Text="When set, the app will watch this folder and auto-import new screenshots into the inbox." />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <ui:TextBox Grid.Column="0"
-                                    Text="{Binding ScreenshotsFolder, UpdateSourceTrigger=PropertyChanged}"
-                                    PlaceholderText="e.g. D:\Jeux\StarCitizen\LIVE\Screenshots" />
-                        <ui:Button Grid.Column="1" Margin="8,0,0,0"
-                                   Padding="14,7"
-                                   Command="{Binding BrowseScreenshotsFolderCommand}"
-                                   ToolTip="Pick the folder Star Citizen writes Print Screen screenshots to.">
+                        <ui:Button DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                   Appearance="Secondary" Padding="10,5"
+                                   Command="{Binding RefreshGameVersionsCommand}"
+                                   ToolTip="Fetch the current LIVE/PTU build numbers from UEX (api/game_versions). Cached for 24h.">
                             <StackPanel Orientation="Horizontal">
-                                <ui:SymbolIcon Symbol="FolderArrowRight24" Margin="0,0,6,0" />
-                                <TextBlock Text="Browse..." />
+                                <ui:SymbolIcon Symbol="ArrowSync24" FontSize="13" Margin="0,0,4,0" />
+                                <TextBlock Text="Refresh versions" FontSize="11" />
                             </StackPanel>
                         </ui:Button>
-                    </Grid>
-                    <TextBlock Margin="0,8,0,0" FontSize="11"
-                               Text="{Binding ScreenshotsFolderStatus}"
-                               Foreground="{Binding ScreenshotsFolderSeverity, Converter={StaticResource SeverityToBrush}}" />
+                    </DockPanel>
+                    <TextBlock Margin="0,8,0,12" Opacity="0.75" TextWrapping="Wrap"
+                               Text="Star Citizen writes screenshots to a different folder per game build. We watch both, and each screenshot is auto-tagged with the matching build number (game_version) from UEX — you don't need to remember which build is current." />
+
+                    <!-- LIVE FOLDER -->
+                    <Border BorderThickness="0,0,0,1" Padding="0,0,0,14" Margin="0,0,0,14"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,6">
+                                <Border CornerRadius="3" Padding="6,2"
+                                        Background="#1FA34A" VerticalAlignment="Center">
+                                    <TextBlock Text="LIVE" FontSize="10" FontWeight="SemiBold"
+                                               Foreground="White" />
+                                </Border>
+                                <TextBlock Text="LIVE channel screenshots folder"
+                                           FontSize="13" FontWeight="SemiBold"
+                                           Margin="8,0,0,0" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <TextBlock Margin="0,0,0,6" Opacity="0.75" FontSize="11"
+                                       Text="{Binding LiveGameVersionLabel}" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ui:TextBox Grid.Column="0"
+                                            Text="{Binding LiveScreenshotsFolder, UpdateSourceTrigger=PropertyChanged}"
+                                            PlaceholderText="e.g. D:\Jeux\StarCitizen\LIVE\Screenshots" />
+                                <ui:Button Grid.Column="1" Margin="8,0,0,0" Padding="14,7"
+                                           Command="{Binding BrowseLiveScreenshotsFolderCommand}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="FolderArrowRight24" Margin="0,0,6,0" />
+                                        <TextBlock Text="Browse..." />
+                                    </StackPanel>
+                                </ui:Button>
+                            </Grid>
+                            <TextBlock Margin="0,8,0,0" FontSize="11"
+                                       Text="{Binding LiveScreenshotsFolderStatus}"
+                                       Foreground="{Binding LiveScreenshotsFolderSeverity, Converter={StaticResource SeverityToBrush}}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- PTU FOLDER -->
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,6">
+                            <Border CornerRadius="3" Padding="6,2"
+                                    Background="#D97706" VerticalAlignment="Center">
+                                <TextBlock Text="PTU" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="White" />
+                            </Border>
+                            <TextBlock Text="PTU channel screenshots folder (optional)"
+                                       FontSize="13" FontWeight="SemiBold"
+                                       Margin="8,0,0,0" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <TextBlock Margin="0,0,0,6" Opacity="0.75" FontSize="11"
+                                   Text="{Binding PtuGameVersionLabel}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ui:TextBox Grid.Column="0"
+                                        Text="{Binding PtuScreenshotsFolder, UpdateSourceTrigger=PropertyChanged}"
+                                        PlaceholderText="e.g. D:\Jeux\StarCitizen\PTU\Screenshots (leave empty if you don't run PTU)" />
+                            <ui:Button Grid.Column="1" Margin="8,0,0,0" Padding="14,7"
+                                       Command="{Binding BrowsePtuScreenshotsFolderCommand}">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="FolderArrowRight24" Margin="0,0,6,0" />
+                                    <TextBlock Text="Browse..." />
+                                </StackPanel>
+                            </ui:Button>
+                        </Grid>
+                        <TextBlock Margin="0,8,0,0" FontSize="11"
+                                   Text="{Binding PtuScreenshotsFolderStatus}"
+                                   Foreground="{Binding PtuScreenshotsFolderSeverity, Converter={StaticResource SeverityToBrush}}" />
+                        <Border Margin="0,8,0,0" Padding="10,7" CornerRadius="4"
+                                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                            <DockPanel>
+                                <ui:SymbolIcon Symbol="Warning16" Margin="0,0,8,0" Opacity="0.75" />
+                                <TextBlock TextWrapping="Wrap" FontSize="11"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           Text="UEX may temporarily reject PTU reports during patch transitions (ptu_reports_not_allowed). When that happens your data is still kept in the local History so you can resubmit later." />
+                            </DockPanel>
+                        </Border>
+                    </StackPanel>
                 </StackPanel>
             </ui:Card>
 

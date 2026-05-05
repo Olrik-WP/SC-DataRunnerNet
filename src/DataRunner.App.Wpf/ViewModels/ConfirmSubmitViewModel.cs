@@ -30,8 +30,27 @@ public sealed partial class ConfirmSubmitViewModel : ObservableObject
     [ObservableProperty] private bool _acknowledgeWarnings;
     [ObservableProperty] private bool _overrideBlock;
 
+    /// <summary>
+    /// Game branch the screenshot originates from. Set by the editor before
+    /// the dialog is shown so the confirm UI can render a coloured pill
+    /// (green LIVE / orange PTU) next to the production-mode pill — the user
+    /// sees both /data_submit fields (`is_production` and `game_version`) at
+    /// a glance before clicking Send.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BranchLabel))]
+    [NotifyPropertyChangedFor(nameof(IsPtuBranch))]
+    private GameBranch _branch;
+
     /// <summary>Read-only label shown in the footer: "TEST" or "PRODUCTION (live)".</summary>
     public string ModeLabel => IsProduction ? "PRODUCTION (live to UEX)" : "TEST (recorded only)";
+
+    /// <summary>"LIVE" or "PTU" — drives the branch pill text in the dialog footer.</summary>
+    public string BranchLabel => Branch == GameBranch.Ptu ? "PTU" : "LIVE";
+
+    /// <summary>True for PTU submissions; surfaces an info banner reminding
+    /// the user UEX may temporarily reject PTU reports.</summary>
+    public bool IsPtuBranch => Branch == GameBranch.Ptu;
 
     public bool HasBlockingIssues =>
         Validation.IsBlocking || Duplicates.Worst == DuplicateSeverity.Block;

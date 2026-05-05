@@ -17,7 +17,21 @@ public sealed class JsonAppPreferences : IAppPreferences
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     public bool AttachScreenshotOnSubmit { get; set; } = true;
-    public string? ScreenshotsFolder { get; set; }
+    public string? LiveScreenshotsFolder { get; set; }
+    public string? PtuScreenshotsFolder { get; set; }
+
+    /// <summary>
+    /// Compatibility shim for callers that haven't been updated to the
+    /// LIVE/PTU split yet. Reads/writes always go through
+    /// <see cref="LiveScreenshotsFolder"/> — the LIVE channel is the
+    /// historical default behaviour.
+    /// </summary>
+    public string? ScreenshotsFolder
+    {
+        get => LiveScreenshotsFolder;
+        set => LiveScreenshotsFolder = value;
+    }
+
     public bool DeleteScreenshotAfterSubmit { get; set; } = true;
     public bool DefaultIsProduction { get; set; } = true;
     public bool InboxCollapsed { get; set; } = false;
@@ -40,7 +54,16 @@ public sealed class JsonAppPreferences : IAppPreferences
                 .ConfigureAwait(false);
             if (dto is null) return;
             AttachScreenshotOnSubmit = dto.AttachScreenshotOnSubmit;
-            ScreenshotsFolder = dto.ScreenshotsFolder;
+
+            // Migration: prior versions wrote a single `screenshotsFolder`
+            // entry. We forward it to the LIVE slot when no LIVE/PTU values
+            // are present yet. The legacy field is then dropped on the next
+            // SaveAsync (it's no longer in PrefsDto's serialised output).
+            LiveScreenshotsFolder = !string.IsNullOrWhiteSpace(dto.LiveScreenshotsFolder)
+                ? dto.LiveScreenshotsFolder
+                : dto.ScreenshotsFolder;
+            PtuScreenshotsFolder = dto.PtuScreenshotsFolder;
+
             DeleteScreenshotAfterSubmit = dto.DeleteScreenshotAfterSubmit;
             DefaultIsProduction = dto.DefaultIsProduction;
             InboxCollapsed = dto.InboxCollapsed;
@@ -65,7 +88,8 @@ public sealed class JsonAppPreferences : IAppPreferences
             var dto = new PrefsDto
             {
                 AttachScreenshotOnSubmit = AttachScreenshotOnSubmit,
-                ScreenshotsFolder = ScreenshotsFolder,
+                LiveScreenshotsFolder = LiveScreenshotsFolder,
+                PtuScreenshotsFolder = PtuScreenshotsFolder,
                 DeleteScreenshotAfterSubmit = DeleteScreenshotAfterSubmit,
                 DefaultIsProduction = DefaultIsProduction,
                 InboxCollapsed = InboxCollapsed,
@@ -96,7 +120,24 @@ public sealed class JsonAppPreferences : IAppPreferences
     private sealed class PrefsDto
     {
         public bool AttachScreenshotOnSubmit { get; set; } = true;
+
+        /// <summary>
+        /// LIVE-channel screenshots folder. Successor of the legacy
+        /// <see cref="ScreenshotsFolder"/> single-slot field.
+        /// </summary>
+        public string? LiveScreenshotsFolder { get; set; }
+
+        /// <summary>PTU-channel screenshots folder. Optional.</summary>
+        public string? PtuScreenshotsFolder { get; set; }
+
+        /// <summary>
+        /// Legacy single-folder slot. Kept for read-side migration only —
+        /// when present, its value is forwarded to <see cref="LiveScreenshotsFolder"/>.
+        /// We don't write it anymore so prefs.json on disk converges to the
+        /// new shape after the next save.
+        /// </summary>
         public string? ScreenshotsFolder { get; set; }
+
         public bool DeleteScreenshotAfterSubmit { get; set; } = true;
         public bool DefaultIsProduction { get; set; } = true;
         public bool InboxCollapsed { get; set; } = false;

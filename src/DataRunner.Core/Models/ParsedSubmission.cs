@@ -12,6 +12,15 @@ public sealed class ParsedSubmission
     public TerminalTab Tab { get; set; } = TerminalTab.Unknown;
 
     /// <summary>
+    /// Star Citizen game build the screenshot was taken from. Determined by
+    /// the watcher slot that picked up the file (LIVE folder vs PTU folder),
+    /// not by parsing the file path. Resolved at submission time to the
+    /// actual UEX-recognised build number via /game_versions and used as
+    /// the <c>game_version</c> field of the /data_submit payload.
+    /// </summary>
+    public GameBranch Branch { get; set; } = GameBranch.Live;
+
+    /// <summary>
     /// Width of the source screenshot in pixels (0 when not set, eg. test
     /// submissions built from raw text). Surfaced to the validation UI so
     /// it can warn the user when the image was clearly resized / cropped

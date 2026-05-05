@@ -29,6 +29,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPayloadValidator, PayloadValidator>();
         services.AddSingleton<IDuplicateChecker, DuplicateChecker>();
         services.AddSingleton<IStaleTargetProvider, StaleTargetProvider>();
+        services.AddSingleton<IGameVersionsService, GameVersionsService>();
 
         return services;
     }

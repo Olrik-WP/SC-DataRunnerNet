@@ -461,9 +461,12 @@
                     <StackPanel Margin="16,4,16,12">
                         <TextBlock Text="GAME VERSION" Opacity="0.6" FontSize="11"
                                    FontWeight="SemiBold" />
-                        <ui:TextBox Margin="0,4,0,12"
+                        <ui:TextBox Margin="0,4,0,4"
                                     Text="{Binding GameVersion, UpdateSourceTrigger=PropertyChanged}"
-                                    PlaceholderText="e.g. 4.7.2 LIVE" />
+                                    PlaceholderText="e.g. 4.7.2 (auto-filled from UEX)" />
+                        <TextBlock Margin="0,0,0,12" Opacity="0.65" FontSize="10"
+                                   TextWrapping="Wrap"
+                                   Text="{Binding BranchLabel}" />
 
                         <TextBlock Text="DETAILS / NOTES" Opacity="0.6" FontSize="11"
                                    FontWeight="SemiBold" />

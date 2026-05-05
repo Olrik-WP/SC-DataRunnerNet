@@ -3,18 +3,27 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DataRunner.App.Services;
 using DataRunner.Core.Abstractions;
+using DataRunner.Core.Models;
 
 namespace DataRunner.App.ViewModels;
 
 /// <summary>
-/// Welcome wizard shown on first launch. The number of steps is dynamic:
-///   - When the build embeds an app bearer token (official CI release), the
-///     wizard has THREE steps: welcome / secret-key / folder.
-///   - When no token is embedded (self-build / dev), it has FOUR steps:
-///     welcome / secret-key / app-bearer-token / folder.
+/// Welcome wizard shown on first launch. Five logical steps total, with a
+/// dynamic count depending on whether the build embeds a UEX app bearer
+/// token (official CI release) or not (self-built / dev):
 ///
-/// Step indices stay stable for binding simplicity: step 2 is ALWAYS the
-/// bearer step, just skipped (collapsed) when the embedded token is present.
+///   index | shown when         | content
+///   ------|--------------------|-------------------------------------------
+///   0     | always             | Welcome
+///   1     | always             | User secret-key
+///   2     | NO embedded token  | App bearer token (skipped when embedded)
+///   3     | always             | Submission mode (is_production toggle)
+///   4     | always             | Screenshots folders (LIVE + optional PTU)
+///
+/// When the bearer step is skipped, indices 3 and 4 effectively shift down
+/// by one in the visible counter — the per-step <c>ShowXxxStep</c> helpers
+/// take care of that, the rest of the codebase only sees the absolute
+/// index ranges 0..4.
 /// </summary>
 public sealed partial class FirstRunWizardViewModel : ObservableObject
 {
@@ -26,27 +35,31 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
     [ObservableProperty] private int _currentStep = 0;
     [ObservableProperty] private string _secretKeyInput = "";
     [ObservableProperty] private string _bearerTokenInput = "";
-    [ObservableProperty] private string _screenshotsFolder = "";
+    [ObservableProperty] private string _liveScreenshotsFolder = "";
+    [ObservableProperty] private string _ptuScreenshotsFolder = "";
+    [ObservableProperty] private bool _defaultIsProduction = true;
     [ObservableProperty] private bool _isCompleted;
 
     /// <summary>True when a build-time bearer token is available; the wizard
-    /// then skips the bearer step (3 visible steps instead of 4).</summary>
+    /// then skips the bearer step (one less visible step).</summary>
     public bool HasBuiltInBearerToken => _builtInToken.HasToken;
 
     /// <summary>True when the bearer step should be SHOWN to the user (i.e. no
     /// embedded token available). Bound by the view to swap step 2's content.</summary>
     public bool ShowsBearerStep => !HasBuiltInBearerToken;
 
-    public int TotalSteps => HasBuiltInBearerToken ? 3 : 4;
+    /// <summary>4 visible steps when the bearer is embedded, 5 otherwise.</summary>
+    public int TotalSteps => HasBuiltInBearerToken ? 4 : 5;
 
     public bool CanGoNext => CurrentStep switch
     {
         0 => true,
         1 => !string.IsNullOrWhiteSpace(SecretKeyInput),
-        // Step 2 is the bearer step when shown, otherwise the folder step (which
-        // doesn't gate on input).
+        // Step 2 is the bearer step when shown, otherwise the submission-mode
+        // step (which doesn't gate on input).
         2 => HasBuiltInBearerToken || !string.IsNullOrWhiteSpace(BearerTokenInput),
-        3 => true,
+        3 => true,   // Submission mode (or folder when bearer is embedded)
+        4 => true,   // Folder (only reachable on self-build path)
         _ => false,
     };
 
@@ -55,17 +68,19 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
 
     // Per-step visibility helpers used by the XAML so the view stays
     // declarative. When a built-in token is available the wizard collapses
-    // the bearer step; the folder step then "moves up" to take its slot.
+    // the bearer step; later steps then "move up" by one slot.
     public bool ShowWelcomeStep => CurrentStep == 0;
     public bool ShowSecretKeyStep => CurrentStep == 1;
     public bool ShowBearerInputStep => CurrentStep == 2 && !HasBuiltInBearerToken;
-    public bool ShowFolderStep => (CurrentStep == 2 && HasBuiltInBearerToken)
-                                 || (CurrentStep == 3 && !HasBuiltInBearerToken);
+    public bool ShowSubmissionModeStep => (CurrentStep == 2 && HasBuiltInBearerToken)
+                                       || (CurrentStep == 3 && !HasBuiltInBearerToken);
+    public bool ShowFolderStep => (CurrentStep == 3 && HasBuiltInBearerToken)
+                                 || (CurrentStep == 4 && !HasBuiltInBearerToken);
 
-    /// <summary>"Step 2/3" or "Step 2/4" depending on whether the bearer step
-    /// is shown. Bound by the view to render the step counter consistently.</summary>
-    public string SecretKeyStepLabel => HasBuiltInBearerToken ? "1/2" : "1/3";
-    public string FolderStepLabel => HasBuiltInBearerToken ? "2/2" : "3/3";
+    /// <summary>Step counter labels — show "X/N" where N matches <see cref="TotalSteps"/> (minus the welcome step).</summary>
+    public string SecretKeyStepLabel => HasBuiltInBearerToken ? "1/3" : "1/4";
+    public string SubmissionModeStepLabel => HasBuiltInBearerToken ? "2/3" : "3/4";
+    public string FolderStepLabel => HasBuiltInBearerToken ? "3/3" : "4/4";
 
     public FirstRunWizardViewModel(
         ISecretKeyStore secretStore,
@@ -78,31 +93,41 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
         _builtInToken = builtInToken;
         _dialog = dialog;
 
-        // Pre-fill with whatever the user already has in prefs (in case they re-open
-        // the wizard), or fall back to the standard SC location if it exists.
-        if (!string.IsNullOrWhiteSpace(_prefs.ScreenshotsFolder))
-        {
-            ScreenshotsFolder = _prefs.ScreenshotsFolder!;
-        }
-        else
-        {
-            ScreenshotsFolder = FindScScreenshotsFolder() ?? "";
-        }
+        // Hydrate from prefs first (covers users re-opening the wizard), then
+        // fall back to the standard SC install layouts. PTU folder defaults
+        // to empty when nothing is found — it's optional.
+        LiveScreenshotsFolder = !string.IsNullOrWhiteSpace(_prefs.LiveScreenshotsFolder)
+            ? _prefs.LiveScreenshotsFolder!
+            : (FindScScreenshotsFolder(GameBranch.Live) ?? "");
+        PtuScreenshotsFolder = !string.IsNullOrWhiteSpace(_prefs.PtuScreenshotsFolder)
+            ? _prefs.PtuScreenshotsFolder!
+            : (FindScScreenshotsFolder(GameBranch.Ptu) ?? "");
+
+        DefaultIsProduction = _prefs.DefaultIsProduction;
     }
 
     [RelayCommand]
-    private void BrowseFolder()
+    private void BrowseLiveFolder() => BrowseFolder(GameBranch.Live);
+
+    [RelayCommand]
+    private void BrowsePtuFolder() => BrowseFolder(GameBranch.Ptu);
+
+    private void BrowseFolder(GameBranch branch)
     {
+        var current = branch == GameBranch.Live ? LiveScreenshotsFolder : PtuScreenshotsFolder;
         var dlg = new Microsoft.Win32.OpenFolderDialog
         {
-            Title = "Pick the folder Star Citizen writes screenshots to (Print Screen)",
-            InitialDirectory = !string.IsNullOrWhiteSpace(ScreenshotsFolder) && Directory.Exists(ScreenshotsFolder)
-                ? ScreenshotsFolder
+            Title = branch == GameBranch.Live
+                ? "Pick the LIVE Star Citizen screenshots folder"
+                : "Pick the PTU Star Citizen screenshots folder (optional)",
+            InitialDirectory = !string.IsNullOrWhiteSpace(current) && Directory.Exists(current)
+                ? current
                 : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
         if (dlg.ShowDialog() == true)
         {
-            ScreenshotsFolder = dlg.FolderName;
+            if (branch == GameBranch.Live) LiveScreenshotsFolder = dlg.FolderName;
+            else PtuScreenshotsFolder = dlg.FolderName;
         }
     }
 
@@ -114,6 +139,7 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowWelcomeStep));
         OnPropertyChanged(nameof(ShowSecretKeyStep));
         OnPropertyChanged(nameof(ShowBearerInputStep));
+        OnPropertyChanged(nameof(ShowSubmissionModeStep));
         OnPropertyChanged(nameof(ShowFolderStep));
     }
 
@@ -146,18 +172,21 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
 
         if (IsLastStep)
         {
-            // Persist the screenshots folder picked at step 3. Without this the
-            // wizard "Done" button silently dropped the value and the user had
-            // to re-enter it in Settings (which itself was unreliable, see
-            // SettingsViewModel.OnScreenshotsFolderChanged).
+            // Persist all wizard outputs (folders + submission-mode default).
+            // Without this the "Done" button silently dropped the values and
+            // the user had to re-enter them in Settings.
             try
             {
-                _prefs.ScreenshotsFolder = string.IsNullOrWhiteSpace(ScreenshotsFolder) ? null : ScreenshotsFolder.Trim();
+                _prefs.LiveScreenshotsFolder = string.IsNullOrWhiteSpace(LiveScreenshotsFolder)
+                    ? null : LiveScreenshotsFolder.Trim();
+                _prefs.PtuScreenshotsFolder = string.IsNullOrWhiteSpace(PtuScreenshotsFolder)
+                    ? null : PtuScreenshotsFolder.Trim();
+                _prefs.DefaultIsProduction = DefaultIsProduction;
                 await _prefs.SaveAsync();
             }
             catch (Exception ex)
             {
-                _dialog.ShowError("Could not save screenshots folder", ex.Message);
+                _dialog.ShowError("Could not save preferences", ex.Message);
                 return;
             }
 
@@ -168,44 +197,41 @@ public sealed partial class FirstRunWizardViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Probes several well-known locations for the SC Screenshots folder.
-    /// SC's screenshot path depends on the install drive chosen by the user,
-    /// so we check a few common roots. Returns the first one that exists
-    /// or <c>null</c> when none is found (the user will have to Browse).
+    /// Probes several well-known locations for the SC Screenshots folder
+    /// matching the requested branch. SC's screenshot path depends on the
+    /// install drive chosen by the user, so we check a few common roots.
+    /// Returns the first one that exists or <c>null</c> when none is found
+    /// (the user will have to Browse manually).
     /// </summary>
-    private static string? FindScScreenshotsFolder()
+    private static string? FindScScreenshotsFolder(GameBranch branch)
     {
-        // Standard Roberts launcher path under user profile
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var candidates = new[]
-        {
-            Path.Combine(userProfile, "Pictures", "Roberts Space Industries", "ScreenShots"),
-        };
+        var subfolder = branch == GameBranch.Ptu ? "PTU" : "LIVE";
 
-        // Probe every fixed drive for <root>\StarCitizen\LIVE\Screenshots
-        // and <root>\Roberts Space Industries\StarCitizen\LIVE\Screenshots
-        // (the two most common install layouts).
+        // The Roberts launcher pictures path is shared by all branches; only
+        // surface it for LIVE since that's the most common starting point on
+        // a fresh install. PTU users almost always have a per-install folder.
+        if (branch == GameBranch.Live)
+        {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var roberts = Path.Combine(userProfile, "Pictures", "Roberts Space Industries", "ScreenShots");
+            if (Directory.Exists(roberts)) return roberts;
+        }
+
         foreach (var drive in DriveInfo.GetDrives())
         {
             if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
             var root = drive.RootDirectory.FullName;
-            // D:\StarCitizen\LIVE\Screenshots  (or C:\, E:\, ...)
-            var p1 = Path.Combine(root, "StarCitizen", "LIVE", "Screenshots");
-            if (Directory.Exists(p1)) return p1;
-            // D:\Program Files\Roberts Space Industries\StarCitizen\LIVE\Screenshots
-            var p2 = Path.Combine(root, "Program Files", "Roberts Space Industries", "StarCitizen", "LIVE", "Screenshots");
-            if (Directory.Exists(p2)) return p2;
-            // D:\Jeux\StarCitizen\LIVE\Screenshots  (French installs)
-            var p3 = Path.Combine(root, "Jeux", "StarCitizen", "LIVE", "Screenshots");
-            if (Directory.Exists(p3)) return p3;
-            // D:\Games\StarCitizen\LIVE\Screenshots
-            var p4 = Path.Combine(root, "Games", "StarCitizen", "LIVE", "Screenshots");
-            if (Directory.Exists(p4)) return p4;
-        }
-
-        foreach (var c in candidates)
-        {
-            if (Directory.Exists(c)) return c;
+            string[] candidates =
+            [
+                Path.Combine(root, "StarCitizen", subfolder, "Screenshots"),
+                Path.Combine(root, "Program Files", "Roberts Space Industries", "StarCitizen", subfolder, "Screenshots"),
+                Path.Combine(root, "Jeux", "StarCitizen", subfolder, "Screenshots"),
+                Path.Combine(root, "Games", "StarCitizen", subfolder, "Screenshots"),
+            ];
+            foreach (var c in candidates)
+            {
+                if (Directory.Exists(c)) return c;
+            }
         }
 
         return null;

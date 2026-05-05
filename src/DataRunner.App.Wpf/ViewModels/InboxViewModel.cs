@@ -344,12 +344,28 @@ public sealed partial class InboxViewModel : ObservableObject
         }
 
         var first = sources[0];
+
+        // All merged items share the same terminal, but technically each source
+        // could come from a different watcher slot (LIVE vs PTU). We intersect:
+        // if every source carries the same branch, keep it; if they differ
+        // (rare — a user merging cross-channel screenshots is almost certainly
+        // a mistake), fall back to LIVE since UEX defaults the missing
+        // game_version field to the current LIVE build.
+        var distinctBranches = sources
+            .Select(s => s.Submission!.Branch)
+            .Distinct()
+            .ToList();
+        var mergedBranch = distinctBranches.Count == 1
+            ? distinctBranches[0]
+            : DataRunner.Core.Models.GameBranch.Live;
+
         var mergedSubmission = new ParsedSubmission
         {
             SourceImage = first.Submission!.SourceImage,
             Type = first.Submission.Type,
             IsProduction = first.Submission.IsProduction,
             Tab = first.Submission.Tab,
+            Branch = mergedBranch,
             IdTerminal = first.Submission.IdTerminal,
             TerminalDisplayName = first.Submission.TerminalDisplayName,
             TerminalMatchScore = first.Submission.TerminalMatchScore,
@@ -377,6 +393,7 @@ public sealed partial class InboxViewModel : ObservableObject
             AddedAt = DateTimeOffset.Now,
             TerminalLabel = mergedRichLabel,
             RowCount = mergedRows.Count,
+            Branch = mergedBranch,
             Submission = mergedSubmission,
             // Track ALL sources so the post-send cleanup can delete every file
             // and the rescan filter can skip every basename. Without this the
@@ -399,6 +416,21 @@ public sealed partial class InboxItem : ObservableObject
     [ObservableProperty] private string? _terminalLabel;
     [ObservableProperty] private int _rowCount;
     [ObservableProperty] private string? _statusReason;
+
+    /// <summary>
+    /// Star Citizen branch the screenshot originates from, determined by the
+    /// watcher slot that picked up the file (LIVE folder vs PTU folder).
+    /// Drives the inbox card's coloured branch badge and is propagated into
+    /// the <see cref="ParsedSubmission.Branch"/> when OCR completes so the
+    /// submission carries the right <c>game_version</c>.
+    /// </summary>
+    [ObservableProperty] private GameBranch _branch = GameBranch.Live;
+
+    /// <summary>True for items that came from the PTU watcher slot. Bound by
+    /// the inbox card to swap the badge style (green LIVE vs orange PTU).</summary>
+    public bool IsPtu => Branch == GameBranch.Ptu;
+
+    partial void OnBranchChanged(GameBranch value) => OnPropertyChanged(nameof(IsPtu));
 
     /// <summary>
     /// Strips the redundant "ScreenShot-" prefix and file extension from a Star

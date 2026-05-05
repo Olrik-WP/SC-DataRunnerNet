@@ -1,16 +1,23 @@
 using System.IO;
 using DataRunner.App.ViewModels;
 using DataRunner.Core.Abstractions;
+using DataRunner.Core.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace DataRunner.App.Services;
 
 /// <summary>
-/// Hosted service that watches the configured Star Citizen screenshots folder and
-/// auto-imports new images into the OCR pipeline. Reacts to settings changes:
-/// when the user picks a new folder in <see cref="SettingsViewModel"/>, the watcher
-/// is recreated on the new path with no restart.
+/// Hosted service that watches the configured Star Citizen screenshots folders
+/// (LIVE + optional PTU slot) and auto-imports new images into the OCR pipeline.
+///
+/// Each file is tagged with the <see cref="GameBranch"/> matching the slot it
+/// was picked up from — that branch flows all the way to the /data_submit
+/// payload's <c>game_version</c> field so LIVE and PTU prices never collide.
+///
+/// Reacts to settings changes: when the user picks new folders in
+/// <see cref="SettingsViewModel"/>, the matching watcher is re-created with no
+/// app restart needed.
 /// </summary>
 public sealed class ScreenshotFolderWatcher : IHostedService, IDisposable
 {
@@ -32,8 +39,32 @@ public sealed class ScreenshotFolderWatcher : IHostedService, IDisposable
     private readonly ISubmissionHistory _history;
     private readonly ILogger<ScreenshotFolderWatcher> _logger;
 
-    private FileSystemWatcher? _fsw;
-    private string? _currentFolder;
+    /// <summary>
+    /// Per-branch watcher slot. Each instance owns one <see cref="FileSystemWatcher"/>
+    /// dedicated to a specific game branch so LIVE and PTU events are routed
+    /// independently into the inbox.
+    /// </summary>
+    private sealed class WatcherSlot : IDisposable
+    {
+        public GameBranch Branch { get; }
+        public FileSystemWatcher? Fsw { get; set; }
+        public string? Folder { get; set; }
+
+        public WatcherSlot(GameBranch branch) { Branch = branch; }
+
+        public void Dispose()
+        {
+            if (Fsw is null) return;
+            Fsw.EnableRaisingEvents = false;
+            Fsw.Dispose();
+            Fsw = null;
+            Folder = null;
+        }
+    }
+
+    private readonly WatcherSlot _liveSlot = new(GameBranch.Live);
+    private readonly WatcherSlot _ptuSlot = new(GameBranch.Ptu);
+
     private CancellationTokenSource? _stopCts;
 
     public ScreenshotFolderWatcher(
@@ -52,14 +83,16 @@ public sealed class ScreenshotFolderWatcher : IHostedService, IDisposable
     {
         _stopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _settings.PropertyChanged += OnSettingsChanged;
-        Reconfigure(_settings.ScreenshotsFolder);
+        Reconfigure(_liveSlot, _settings.LiveScreenshotsFolder);
+        Reconfigure(_ptuSlot, _settings.PtuScreenshotsFolder);
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _settings.PropertyChanged -= OnSettingsChanged;
-        DisposeWatcher();
+        _liveSlot.Dispose();
+        _ptuSlot.Dispose();
         _stopCts?.Cancel();
         _stopCts?.Dispose();
         _stopCts = null;
@@ -68,49 +101,56 @@ public sealed class ScreenshotFolderWatcher : IHostedService, IDisposable
 
     private void OnSettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(SettingsViewModel.ScreenshotsFolder))
+        if (e.PropertyName == nameof(SettingsViewModel.LiveScreenshotsFolder))
         {
-            Reconfigure(_settings.ScreenshotsFolder);
+            Reconfigure(_liveSlot, _settings.LiveScreenshotsFolder);
+        }
+        else if (e.PropertyName == nameof(SettingsViewModel.PtuScreenshotsFolder))
+        {
+            Reconfigure(_ptuSlot, _settings.PtuScreenshotsFolder);
         }
     }
 
-    private void Reconfigure(string folder)
+    private void Reconfigure(WatcherSlot slot, string? folder)
     {
-        DisposeWatcher();
+        slot.Dispose();
 
         if (string.IsNullOrWhiteSpace(folder))
         {
-            _logger.LogInformation("Screenshot folder watcher: no folder configured.");
+            _logger.LogInformation("Screenshot folder watcher [{Branch}]: no folder configured.", slot.Branch);
             return;
         }
         if (!Directory.Exists(folder))
         {
-            _logger.LogWarning("Screenshot folder does not exist: {Folder}", folder);
+            _logger.LogWarning("Screenshot folder [{Branch}] does not exist: {Folder}", slot.Branch, folder);
             return;
         }
 
-        _currentFolder = folder;
+        slot.Folder = folder;
         var fsw = new FileSystemWatcher(folder)
         {
             IncludeSubdirectories = false,
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
             EnableRaisingEvents = false,
         };
-        fsw.Created += OnFile;
-        fsw.Renamed += (s, e) => OnFile(s, e);
+        fsw.Created += (s, e) => OnFile(slot, e);
+        fsw.Renamed += (s, e) => OnFile(slot, e);
         fsw.EnableRaisingEvents = true;
 
-        _fsw = fsw;
-        _logger.LogInformation("Watching screenshot folder: {Folder}", folder);
+        slot.Fsw = fsw;
+        _logger.LogInformation("Watching screenshot folder [{Branch}]: {Folder}", slot.Branch, folder);
 
         // Defensive initial scan: pick up files dropped during the brief window
         // between the user taking a screenshot and the watcher being live.
         var ct = _stopCts?.Token ?? CancellationToken.None;
-        _ = Task.Run(() => InitialScanAsync(folder, InitialScanWindow, ct), ct);
+        _ = Task.Run(() => InitialScanAsync(slot, InitialScanWindow, ct), ct);
     }
 
-    private async Task InitialScanAsync(string folder, TimeSpan window, CancellationToken ct)
+    private async Task InitialScanAsync(WatcherSlot slot, TimeSpan window, CancellationToken ct)
     {
+        var folder = slot.Folder;
+        if (string.IsNullOrWhiteSpace(folder)) return;
+
         try
         {
             var alreadySent = await GetAlreadySentNamesAsync(ct).ConfigureAwait(false);
@@ -129,26 +169,26 @@ public sealed class ScreenshotFolderWatcher : IHostedService, IDisposable
                 if (skipped > 0)
                 {
                     _logger.LogInformation(
-                        "Initial scan: nothing to enqueue ({Skipped} file(s) skipped — already submitted to UEX).",
-                        skipped);
+                        "Initial scan [{Branch}]: nothing to enqueue ({Skipped} file(s) skipped — already submitted to UEX).",
+                        slot.Branch, skipped);
                 }
                 return;
             }
 
             _logger.LogInformation(
-                "Initial scan: enqueueing {Count} screenshot(s) from the last {Mins} min in {Folder} (skipped {Skipped} already-submitted).",
-                files.Count, (int)window.TotalMinutes, folder, skipped);
+                "Initial scan [{Branch}]: enqueueing {Count} screenshot(s) from the last {Mins} min in {Folder} (skipped {Skipped} already-submitted).",
+                slot.Branch, files.Count, (int)window.TotalMinutes, folder, skipped);
 
             foreach (var f in files)
             {
                 ct.ThrowIfCancellationRequested();
-                await EnqueueWhenStableAsync(f.FullName, ct).ConfigureAwait(false);
+                await EnqueueWhenStableAsync(f.FullName, slot.Branch, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Initial folder scan failed for {Folder}", folder);
+            _logger.LogWarning(ex, "Initial folder scan [{Branch}] failed for {Folder}", slot.Branch, folder);
         }
     }
 
@@ -185,60 +225,78 @@ public sealed class ScreenshotFolderWatcher : IHostedService, IDisposable
     public static readonly TimeSpan WindowAll = TimeSpan.MaxValue;
 
     /// <summary>
-    /// Forces a one-shot scan of the configured folder, picking up files modified
-    /// during the last <paramref name="window"/>. Useful from the UI to recover
-    /// from a missed FileSystemWatcher event without restarting the app.
-    /// Pass <see cref="WindowAll"/> to disable the age cutoff entirely.
+    /// Forces a one-shot scan of EVERY configured folder (LIVE + PTU when set),
+    /// picking up files modified during the last <paramref name="window"/>.
+    /// Useful from the UI to recover from a missed FileSystemWatcher event
+    /// without restarting the app. Pass <see cref="WindowAll"/> to disable the
+    /// age cutoff entirely.
     /// </summary>
     public async Task<RescanResult> RescanAsync(TimeSpan? window = null, CancellationToken ct = default)
     {
         // Defensively re-resolve from the SettingsViewModel — the watcher's
         // OnSettingsChanged hook only fires for property changes, not for the
         // initial value. If the user opened the app for the first time without
-        // a configured folder and only set it later via Settings, _currentFolder
-        // might be stale.
-        var folder = _currentFolder;
-        if (string.IsNullOrWhiteSpace(folder))
+        // a configured folder and only set it later via Settings, the slot's
+        // current Folder might be stale.
+        if (string.IsNullOrWhiteSpace(_liveSlot.Folder))
         {
-            folder = _settings.ScreenshotsFolder;
-            if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder))
+            var fresh = _settings.LiveScreenshotsFolder;
+            if (!string.IsNullOrWhiteSpace(fresh) && Directory.Exists(fresh))
             {
-                _logger.LogInformation("Rescan: lazy-reconfiguring on {Folder} (watcher had no folder).", folder);
-                Reconfigure(folder);
-                folder = _currentFolder;
+                _logger.LogInformation("Rescan [LIVE]: lazy-reconfiguring on {Folder}.", fresh);
+                Reconfigure(_liveSlot, fresh);
+            }
+        }
+        if (string.IsNullOrWhiteSpace(_ptuSlot.Folder))
+        {
+            var fresh = _settings.PtuScreenshotsFolder;
+            if (!string.IsNullOrWhiteSpace(fresh) && Directory.Exists(fresh))
+            {
+                _logger.LogInformation("Rescan [PTU]: lazy-reconfiguring on {Folder}.", fresh);
+                Reconfigure(_ptuSlot, fresh);
             }
         }
 
-        if (string.IsNullOrWhiteSpace(folder))
+        var configuredSlots = new[] { _liveSlot, _ptuSlot }
+            .Where(s => !string.IsNullOrWhiteSpace(s.Folder) && Directory.Exists(s.Folder))
+            .ToList();
+
+        if (configuredSlots.Count == 0)
         {
             return new RescanResult(false, 0, null,
-                "No screenshots folder is configured. Open Settings → Screenshots folder, pick or paste your Star Citizen screenshots folder, then try again.");
-        }
-        if (!Directory.Exists(folder))
-        {
-            return new RescanResult(false, 0, folder,
-                $"The configured folder does not exist:\n{folder}\n\nFix the path in Settings → Screenshots folder.");
+                "No screenshots folder is configured. Open Settings → Screenshots folders, " +
+                "set a path for LIVE (and optionally PTU), then try again.");
         }
 
         var effectiveWindow = window ?? InitialScanWindow;
-        var picked = await CountAndScanAsync(folder, effectiveWindow, ct).ConfigureAwait(false);
+        var totalPicked = 0;
+        foreach (var slot in configuredSlots)
+        {
+            totalPicked += await CountAndScanAsync(slot, effectiveWindow, ct).ConfigureAwait(false);
+        }
+
         var windowLabel = FormatWindow(effectiveWindow);
-        return new RescanResult(true, picked, folder,
-            picked == 0
-                ? $"Folder is reachable but no screenshots {windowLabel} were found."
-                : $"Picked up {picked} screenshot(s) {windowLabel}.");
+        var folderSummary = string.Join(" + ",
+            configuredSlots.Select(s => $"{s.Branch}={Path.GetFileName(s.Folder!.TrimEnd(Path.DirectorySeparatorChar))}"));
+        return new RescanResult(true, totalPicked, folderSummary,
+            totalPicked == 0
+                ? $"Folders are reachable but no screenshots {windowLabel} were found."
+                : $"Picked up {totalPicked} screenshot(s) {windowLabel}.");
     }
 
     private static string FormatWindow(TimeSpan w)
     {
-        if (w == WindowAll) return "in the folder";
+        if (w == WindowAll) return "in the folder(s)";
         if (w.TotalMinutes < 60) return $"from the last {(int)w.TotalMinutes} min";
         if (w.TotalHours < 24) return $"from the last {(int)w.TotalHours} h";
         return $"from the last {(int)w.TotalDays} day(s)";
     }
 
-    private async Task<int> CountAndScanAsync(string folder, TimeSpan window, CancellationToken ct)
+    private async Task<int> CountAndScanAsync(WatcherSlot slot, TimeSpan window, CancellationToken ct)
     {
+        var folder = slot.Folder;
+        if (string.IsNullOrWhiteSpace(folder)) return 0;
+
         try
         {
             var alreadySent = await GetAlreadySentNamesAsync(ct).ConfigureAwait(false);
@@ -262,35 +320,46 @@ public sealed class ScreenshotFolderWatcher : IHostedService, IDisposable
             var skipped = allInWindow.Count - files.Count;
             if (skipped > 0)
             {
-                _logger.LogInformation("Rescan: skipping {Skipped} file(s) already submitted to UEX.", skipped);
+                _logger.LogInformation("Rescan [{Branch}]: skipping {Skipped} file(s) already submitted to UEX.",
+                    slot.Branch, skipped);
             }
 
             foreach (var f in files)
             {
                 ct.ThrowIfCancellationRequested();
-                await EnqueueWhenStableAsync(f.FullName, ct).ConfigureAwait(false);
+                await EnqueueWhenStableAsync(f.FullName, slot.Branch, ct).ConfigureAwait(false);
             }
             return files.Count;
         }
         catch (OperationCanceledException) { return 0; }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Rescan failed for {Folder}", folder);
+            _logger.LogWarning(ex, "Rescan [{Branch}] failed for {Folder}", slot.Branch, folder);
             return 0;
         }
     }
 
-    /// <summary>Currently watched folder, or null if none.</summary>
-    public string? CurrentFolder => _currentFolder;
+    /// <summary>Currently watched LIVE folder, or null if none.</summary>
+    public string? CurrentLiveFolder => _liveSlot.Folder;
 
-    private void OnFile(object? sender, FileSystemEventArgs e)
+    /// <summary>Currently watched PTU folder, or null if none.</summary>
+    public string? CurrentPtuFolder => _ptuSlot.Folder;
+
+    /// <summary>
+    /// Back-compat alias: the legacy <c>CurrentFolder</c> always returned the
+    /// single watched folder. Callers (eg. the inbox "Open folder" button)
+    /// still get the LIVE one by default.
+    /// </summary>
+    public string? CurrentFolder => _liveSlot.Folder;
+
+    private void OnFile(WatcherSlot slot, FileSystemEventArgs e)
     {
         if (!IsAllowed(e.FullPath)) return;
         var ct = _stopCts?.Token ?? CancellationToken.None;
-        _ = Task.Run(async () => await EnqueueWhenStableAsync(e.FullPath, ct).ConfigureAwait(false), ct);
+        _ = Task.Run(async () => await EnqueueWhenStableAsync(e.FullPath, slot.Branch, ct).ConfigureAwait(false), ct);
     }
 
-    private async Task EnqueueWhenStableAsync(string path, CancellationToken ct)
+    private async Task EnqueueWhenStableAsync(string path, GameBranch branch, CancellationToken ct)
     {
         try
         {
@@ -299,8 +368,8 @@ public sealed class ScreenshotFolderWatcher : IHostedService, IDisposable
                 _logger.LogWarning("File never stabilised, skipping: {Path}", path);
                 return;
             }
-            _logger.LogInformation("Auto-import from watched folder: {Path}", path);
-            _coordinator.EnqueueAndProcess(path);
+            _logger.LogInformation("Auto-import [{Branch}]: {Path}", branch, path);
+            _coordinator.EnqueueAndProcess(path, branch);
         }
         catch (OperationCanceledException) { /* shutdown */ }
         catch (Exception ex)
@@ -356,14 +425,9 @@ public sealed class ScreenshotFolderWatcher : IHostedService, IDisposable
         return AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase);
     }
 
-    private void DisposeWatcher()
+    public void Dispose()
     {
-        if (_fsw is null) return;
-        _fsw.EnableRaisingEvents = false;
-        _fsw.Dispose();
-        _fsw = null;
-        _currentFolder = null;
+        _liveSlot.Dispose();
+        _ptuSlot.Dispose();
     }
-
-    public void Dispose() => DisposeWatcher();
 }

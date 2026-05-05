@@ -79,34 +79,106 @@
                                     PlaceholderText="app bearer token" />
                 </StackPanel>
 
-                <!-- Folder -->
+                <!-- Submission mode (is_production) -->
+                <StackPanel Visibility="{Binding ShowSubmissionModeStep, Converter={StaticResource BoolToVisibility}}">
+                    <ui:SymbolIcon Symbol="ArrowUpload24" FontSize="48" HorizontalAlignment="Center" />
+                    <TextBlock FontSize="18" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" Margin="0,12,0,4">
+                        <Run Text="{Binding SubmissionModeStepLabel, Mode=OneWay}" />
+                        <Run Text=" — Submission mode (is_production)" />
+                    </TextBlock>
+                    <TextBlock TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"
+                               MaxWidth="540" Opacity="0.75"
+                               Text="Every report you send to UEX has a flag called is_production. PRODUCTION reports go LIVE on uexcorp.space and update the public commodity prices everyone uses. TEST reports are recorded in your account but don't affect public prices — useful for debugging or trying the app." />
+                    <TextBlock TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"
+                               MaxWidth="540" Opacity="0.65" FontSize="11" Margin="0,8,0,12"
+                               FontStyle="Italic"
+                               Text="Independent of LIVE/PTU game build: even a TEST submission keeps its game_version tag. You can flip this on a per-submission basis in the confirm dialog before sending." />
+                    <Border MaxWidth="500" HorizontalAlignment="Center"
+                            Padding="14,10" CornerRadius="6"
+                            Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                        <CheckBox IsChecked="{Binding DefaultIsProduction, Mode=TwoWay}">
+                            <StackPanel>
+                                <TextBlock Text="Send submissions in PRODUCTION mode by default"
+                                           FontWeight="SemiBold" />
+                                <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="11" Margin="0,2,0,0"
+                                           Text="Recommended. Uncheck to start in TEST mode while you get familiar with the app — you can flip this back in Settings any time." />
+                            </StackPanel>
+                        </CheckBox>
+                    </Border>
+                </StackPanel>
+
+                <!-- Folder (LIVE + optional PTU) -->
                 <StackPanel Visibility="{Binding ShowFolderStep, Converter={StaticResource BoolToVisibility}}">
                     <ui:SymbolIcon Symbol="Folder24" FontSize="48" HorizontalAlignment="Center" />
                     <TextBlock FontSize="18" FontWeight="SemiBold"
                                HorizontalAlignment="Center" Margin="0,12,0,4">
                         <Run Text="{Binding FolderStepLabel, Mode=OneWay}" />
-                        <Run Text=" — Star Citizen screenshots folder" />
+                        <Run Text=" — Star Citizen screenshots folders" />
                     </TextBlock>
                     <TextBlock TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"
-                               MaxWidth="500" Opacity="0.75"
-                               Text="The app will watch this folder and queue every new screenshot in your Inbox. You can change it later in Settings." />
-                    <Grid Margin="0,12,0,0" MaxWidth="480">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <ui:TextBox Grid.Column="0"
-                                    Text="{Binding ScreenshotsFolder, UpdateSourceTrigger=PropertyChanged}"
-                                    PlaceholderText="C:\Users\...\Roberts Space Industries\ScreenShots" />
-                        <ui:Button Grid.Column="1" Margin="8,0,0,0"
-                                   Padding="14,7"
-                                   Command="{Binding BrowseFolderCommand}">
-                            <StackPanel Orientation="Horizontal">
-                                <ui:SymbolIcon Symbol="FolderArrowRight24" Margin="0,0,6,0" />
-                                <TextBlock Text="Browse..." />
-                            </StackPanel>
-                        </ui:Button>
-                    </Grid>
+                               MaxWidth="540" Opacity="0.75"
+                               Text="Star Citizen writes screenshots to a different folder per game build (LIVE vs PTU). We watch both, and each screenshot is automatically tagged with the matching build number from UEX. You can change this later in Settings." />
+
+                    <!-- LIVE -->
+                    <StackPanel Margin="0,16,0,0" MaxWidth="540">
+                        <DockPanel Margin="0,0,0,4">
+                            <Border CornerRadius="3" Padding="6,2"
+                                    Background="#1FA34A" VerticalAlignment="Center">
+                                <TextBlock Text="LIVE" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="White" />
+                            </Border>
+                            <TextBlock Text="LIVE channel folder"
+                                       FontSize="12" FontWeight="SemiBold"
+                                       Margin="8,0,0,0" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ui:TextBox Grid.Column="0"
+                                        Text="{Binding LiveScreenshotsFolder, UpdateSourceTrigger=PropertyChanged}"
+                                        PlaceholderText="e.g. D:\Jeux\StarCitizen\LIVE\Screenshots" />
+                            <ui:Button Grid.Column="1" Margin="8,0,0,0" Padding="14,7"
+                                       Command="{Binding BrowseLiveFolderCommand}">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="FolderArrowRight24" Margin="0,0,6,0" />
+                                    <TextBlock Text="Browse..." />
+                                </StackPanel>
+                            </ui:Button>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- PTU (optional) -->
+                    <StackPanel Margin="0,12,0,0" MaxWidth="540">
+                        <DockPanel Margin="0,0,0,4">
+                            <Border CornerRadius="3" Padding="6,2"
+                                    Background="#D97706" VerticalAlignment="Center">
+                                <TextBlock Text="PTU" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="White" />
+                            </Border>
+                            <TextBlock Text="PTU channel folder (optional)"
+                                       FontSize="12" FontWeight="SemiBold"
+                                       Margin="8,0,0,0" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ui:TextBox Grid.Column="0"
+                                        Text="{Binding PtuScreenshotsFolder, UpdateSourceTrigger=PropertyChanged}"
+                                        PlaceholderText="Leave empty if you don't run PTU" />
+                            <ui:Button Grid.Column="1" Margin="8,0,0,0" Padding="14,7"
+                                       Command="{Binding BrowsePtuFolderCommand}">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="FolderArrowRight24" Margin="0,0,6,0" />
+                                    <TextBlock Text="Browse..." />
+                                </StackPanel>
+                            </ui:Button>
+                        </Grid>
+                    </StackPanel>
                 </StackPanel>
             </Grid>
 

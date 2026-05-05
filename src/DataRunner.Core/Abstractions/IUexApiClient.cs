@@ -16,6 +16,13 @@ public interface IUexApiClient
     /// </summary>
     Task<IReadOnlyList<UexCommodityPriceAll>> GetAllCommodityPricesAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// GET /game_versions — returns the Star Citizen build numbers UEX
+    /// currently accepts in /data_submit's <c>game_version</c> field.
+    /// Cache TTL is 1 day server-side; clients should respect it.
+    /// </summary>
+    Task<UexGameVersions> GetGameVersionsAsync(CancellationToken ct = default);
+
     /// <summary>POST /data_submit. Returns the raw API response body.</summary>
     Task<UexSubmitResult> SubmitDataAsync(UexDataSubmitPayload payload, CancellationToken ct = default);
 }
