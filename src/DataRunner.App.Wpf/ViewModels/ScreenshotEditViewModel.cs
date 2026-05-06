@@ -620,25 +620,11 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         // doesn't auto-detect that because they're computed properties.
         OnPropertyChanged(nameof(IsMergedItem));
         OnPropertyChanged(nameof(MergedSourceCount));
-        // Each load resets the explicit-confirmation flags: the OCR's pre-pick
-        // is a guess, not a commitment from the user. They must still confirm
-        // (even if just by clicking the same terminal in the dropdown) when
-        // the terminal name is ambiguous, and re-tick the override to bypass
-        // any blocking validation errors on this new screenshot.
-        UserExplicitlyConfirmedTerminal = false;
-        UserOverrideValidation = false;
-        // The production mode is a global preference now (Settings) — re-read
-        // it on every load so the editor reflects the current global value
-        // and the confirm dialog displays the right mode badge.
-        IsProduction = _prefs.DefaultIsProduction;
+
         // Inherit the branch from the inbox item (set by the watcher slot the
-        // screenshot was picked up from). Pre-fill the GAME VERSION field with
-        // the resolved build number from /game_versions so the user sees the
-        // exact value that will be sent and can override if they want.
+        // screenshot was picked up from). The draft (if any) cannot override
+        // branch — it's a hard property of the source folder.
         Branch = item.Branch;
-        // Fire the resolution best-effort: if the cache misses we still hold
-        // a sensible literal ("LIVE" / "PTU") via Resolve()'s fallback path.
-        _ = ResolveAndAssignGameVersionAsync();
         SourceImagePath = item.ImagePath;
         try
         {
@@ -655,6 +641,8 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
             _logger.LogWarning(ex, "Failed to load preview image: {Path}", item.ImagePath);
         }
 
+        // Hydrate the OCR-shaped fields (Tab, terminal, rows, container sizes)
+        // from the parsed submission first. This is the canonical baseline.
         Rows.Clear();
         if (item.Submission is not null)
         {
@@ -676,7 +664,136 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
             SourceImageHeight = 0;
         }
 
+        // Apply the user-side draft AFTER the OCR hydrate so any manual edits
+        // override the OCR baseline (eg. the user picked SELL where the
+        // detector returned Unknown, or typed a terminal name the catalog
+        // didn't auto-resolve). Without this, every navigation away from
+        // and back to an item would silently revert their work.
+        if (item.HasDraft)
+        {
+            ApplyDraftFrom(item);
+            // The Send-to-UEX gate is the same as it was last time: the user
+            // already saw the warnings on this item, so re-arm their override
+            // (if they had ticked it) without forcing a re-tick.
+            UserOverrideValidation = item.DraftUserOverrideValidation;
+            UserExplicitlyConfirmedTerminal = item.DraftUserExplicitlyConfirmedTerminal;
+        }
+        else
+        {
+            // First time the user opens this item: production mode follows
+            // the global preference, ambiguity gate stays armed, override
+            // un-ticked. Same behaviour as before drafts existed.
+            UserExplicitlyConfirmedTerminal = false;
+            UserOverrideValidation = false;
+            IsProduction = _prefs.DefaultIsProduction;
+            Details = "";
+            // Pre-fill GAME VERSION from /game_versions (auto-resolved), but
+            // don't clobber a value the user might have typed. The auto-fill
+            // helper already short-circuits when GameVersion is non-empty.
+            GameVersion = "";
+            _ = ResolveAndAssignGameVersionAsync();
+        }
+
         UpdateTerminalSuggestions();
+    }
+
+    /// <summary>
+    /// Restores the user-only fields (game version override, details,
+    /// per-item production toggle) from a previously-saved draft. The
+    /// OCR-derived fields (Tab, terminal, rows) are NOT restored here —
+    /// they live on <see cref="InboxItem.Submission"/> and were already
+    /// hydrated by <see cref="HydrateFrom"/> earlier in <see cref="Load"/>.
+    /// </summary>
+    private void ApplyDraftFrom(InboxItem item)
+    {
+        // GAME VERSION: if the user typed a custom value, honour it as-is.
+        // Otherwise leave the field empty and trigger the auto-resolution
+        // again so it picks up the freshest /game_versions response.
+        if (!string.IsNullOrWhiteSpace(item.DraftGameVersion))
+        {
+            GameVersion = item.DraftGameVersion!;
+        }
+        else
+        {
+            GameVersion = "";
+            _ = ResolveAndAssignGameVersionAsync();
+        }
+
+        Details = item.DraftDetails ?? "";
+
+        // IS_PRODUCTION: per-item override beats the global default. The
+        // draft only stores a value when the user explicitly toggled it
+        // (null = "follow current global preference").
+        IsProduction = item.DraftIsProduction ?? _prefs.DefaultIsProduction;
+    }
+
+    /// <summary>
+    /// Writes the current form state back into the bound <see cref="InboxItem"/>
+    /// so the user's edits survive across selection changes (Inbox → another
+    /// item → back), navigation (Inbox → Settings → Inbox), and any other
+    /// action that creates a fresh editor instance for the same item.
+    ///
+    /// The OCR-shaped fields (Tab, terminal, container sizes, rows) are
+    /// projected back into <see cref="InboxItem.Submission"/> as a
+    /// <see cref="ParsedSubmission"/>. The user-only fields (game version
+    /// override, details, per-item production toggle, ambiguity confirm,
+    /// validation override) are stored on the InboxItem itself.
+    ///
+    /// Safe to call multiple times — idempotent. No-op when no item is
+    /// currently bound.
+    /// </summary>
+    public void SaveDraftToBoundItem()
+    {
+        if (_bound is null) return;
+
+        // Mirror form rows back into a fresh ParsedSubmission, REPLACING the
+        // OCR-only baseline. After this point InboxItem.Submission carries
+        // the user's edits (post-OCR), which is exactly what we want when
+        // the editor reloads the same item later.
+        var submission = _bound.Submission ?? new ParsedSubmission
+        {
+            SourceImage = System.IO.Path.GetFileName(_bound.ImagePath),
+            Type = "commodity",
+        };
+
+        submission.Tab = Tab;
+        submission.IdTerminal = SelectedTerminal?.Id;
+        submission.TerminalDisplayName = SelectedTerminal?.DisplayName;
+        submission.TerminalMatchScore = TerminalMatchScore;
+        submission.TerminalMatchedField = string.IsNullOrEmpty(TerminalSourceField) ? null : TerminalSourceField;
+        submission.TerminalMatchedFromOcr = string.IsNullOrEmpty(TerminalFromOcr) ? null : TerminalFromOcr;
+        submission.ContainerSizes = string.IsNullOrWhiteSpace(ContainerSizes) ? null : ContainerSizes;
+        submission.Branch = Branch;
+        submission.SourceImageWidth = SourceImageWidth;
+        submission.SourceImageHeight = SourceImageHeight;
+
+        submission.Prices = Rows.Select(r => new ParsedPriceRow
+        {
+            IdCommodity = r.Commodity?.Id,
+            CommodityName = r.Commodity?.Name,
+            CommodityCode = r.Commodity?.Code,
+            CommodityMatchScore = r.MatchScore,
+            CommodityMatchedFromOcr = string.IsNullOrEmpty(r.FromOcr) ? null : r.FromOcr,
+            ScuBuy = r.ScuValue,
+            PriceBuy = r.PriceValue,
+            StatusBuy = r.Status,
+        }).ToList();
+
+        _bound.Submission = submission;
+
+        // User-side fields that don't live on ParsedSubmission.
+        _bound.DraftGameVersion = string.IsNullOrWhiteSpace(GameVersion) ? null : GameVersion.Trim();
+        _bound.DraftDetails = string.IsNullOrWhiteSpace(Details) ? null : Details;
+        // Only persist IsProduction when it diverges from the current
+        // global default, so a future change to the global preference
+        // still affects items where the user never touched the toggle.
+        _bound.DraftIsProduction = IsProduction == _prefs.DefaultIsProduction
+            ? (bool?)null
+            : IsProduction;
+        _bound.DraftUserExplicitlyConfirmedTerminal = UserExplicitlyConfirmedTerminal;
+        _bound.DraftUserOverrideValidation = UserOverrideValidation;
+
+        _bound.HasDraft = true;
     }
 
     private void HydrateFrom(ParsedSubmission s)

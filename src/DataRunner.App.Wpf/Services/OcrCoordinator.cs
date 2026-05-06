@@ -97,6 +97,18 @@ public sealed partial class OcrCoordinator : ObservableObject
             item.RowCount = 0;
             item.Status = InboxStatus.Processing;
             item.StatusReason = "Re-running OCR…";
+
+            // Re-running OCR is an explicit "discard previous edits and
+            // start over" action — wipe any persisted draft so the editor
+            // reloads from the fresh OCR result without re-applying the
+            // user's prior corrections (which may now be inconsistent
+            // with the new OCR output).
+            item.HasDraft = false;
+            item.DraftGameVersion = null;
+            item.DraftDetails = null;
+            item.DraftIsProduction = null;
+            item.DraftUserExplicitlyConfirmedTerminal = false;
+            item.DraftUserOverrideValidation = false;
         });
         _ = ProcessAsync(item);
     }

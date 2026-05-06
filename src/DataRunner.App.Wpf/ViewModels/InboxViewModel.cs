@@ -144,6 +144,14 @@ public sealed partial class InboxViewModel : ObservableObject
 
     partial void OnSelectedItemChanged(InboxItem? value)
     {
+        // FIRST: persist whatever the user has typed in the OUTGOING editor
+        // back onto its bound item. Without this, every selection change
+        // would silently drop pending edits — Tab=Sell pick, manual price
+        // corrections, terminal disambiguation, the lot. SaveDraftToBoundItem
+        // is a no-op when the editor isn't bound to an item, so it's safe
+        // even on the very first selection.
+        CurrentEditor?.SaveDraftToBoundItem();
+
         // Detach from any previously observed item so we don't double-handle
         // status transitions after the selection moves.
         if (_selectionListener is not null)
@@ -431,6 +439,49 @@ public sealed partial class InboxItem : ObservableObject
     public bool IsPtu => Branch == GameBranch.Ptu;
 
     partial void OnBranchChanged(GameBranch value) => OnPropertyChanged(nameof(IsPtu));
+
+    // ---- Editor draft fields ----
+    // The form-side state that doesn't map back into ParsedSubmission lives
+    // on the InboxItem itself so the user's edits survive across selection
+    // changes (Inbox → another item → back), navigation (Inbox → Settings →
+    // Inbox), and even app restarts (when persisted in a future pass).
+    // ScreenshotEditViewModel.SaveDraftToBoundItem() writes here; Load()
+    // hydrates from here when present, falling back to the OCR-only
+    // ParsedSubmission otherwise.
+
+    /// <summary>User-overridden game version for this item (populated when
+    /// the user typed something different from the auto-resolved LIVE/PTU
+    /// build). <c>null</c> means "use the resolved default at submit time".</summary>
+    public string? DraftGameVersion { get; set; }
+
+    /// <summary>Free-form notes typed by the user in the DETAILS field.</summary>
+    public string? DraftDetails { get; set; }
+
+    /// <summary>True when the user has explicitly toggled the per-item
+    /// production override after Load() — overrides the global
+    /// <c>DefaultIsProduction</c> preference for this item only. <c>null</c>
+    /// means "follow the current global preference".</summary>
+    public bool? DraftIsProduction { get; set; }
+
+    /// <summary>True when the user clicked an item in the terminal dropdown
+    /// (or otherwise made an explicit choice) to disambiguate a name that
+    /// exists in multiple star systems. Persists the ambiguity-confirmation
+    /// flag across selection changes so the user doesn't have to re-confirm
+    /// when they come back to an item they already disambiguated.</summary>
+    public bool DraftUserExplicitlyConfirmedTerminal { get; set; }
+
+    /// <summary>True when the user ticked the "I have reviewed everything"
+    /// override checkbox to bypass blocking validation errors. Persisted on
+    /// the item so navigating away and back doesn't silently re-arm the
+    /// blocking gate.</summary>
+    public bool DraftUserOverrideValidation { get; set; }
+
+    /// <summary>True once <see cref="ScreenshotEditViewModel.SaveDraftToBoundItem"/>
+    /// has run at least once for this item, ie. the user has touched the
+    /// editor. Used so <see cref="ScreenshotEditViewModel.Load"/> knows
+    /// whether to honour the draft (resume edits) or treat the item as
+    /// fresh (use the OCR result + global defaults).</summary>
+    public bool HasDraft { get; set; }
 
     /// <summary>
     /// Strips the redundant "ScreenShot-" prefix and file extension from a Star
