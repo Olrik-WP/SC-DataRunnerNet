@@ -62,6 +62,30 @@
                     <Run Text="{Binding TotalCount, Mode=OneWay}" />
                     <Run Text=" actionable rows." />
                 </TextBlock>
+                <TextBlock VerticalAlignment="Center"
+                           Margin="16,0,0,0"
+                           Opacity="0.7"
+                           FontStyle="Italic"
+                           ToolTip="Phantom rows whose terminal was removed or renamed in a CIG patch. UEX still serves their last known prices via /commodities_prices_all but no datarunner can physically refresh them. Tick &quot;Show unreachable&quot; below to inspect them.">
+                    <Run Text="(" />
+                    <Run Text="{Binding UnreachableTotal, Mode=OneWay}" FontWeight="SemiBold" />
+                    <Run Text=" unreachable rows hidden)" />
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <!-- Visible only when there ARE unreachable rows AND the user hasn't ticked "Show unreachable". -->
+                                <DataTrigger Binding="{Binding ShowUnreachable}" Value="False">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                                <!-- Override: nothing to mention if zero phantoms exist. -->
+                                <DataTrigger Binding="{Binding UnreachableTotal}" Value="0">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
                 <TextBlock Text="{Binding StatusMessage}"
                            Margin="16,0,0,0" Opacity="0.6"
                            VerticalAlignment="Center"
@@ -74,6 +98,7 @@
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
@@ -99,8 +124,15 @@
                 <CheckBox Grid.Column="3"
                           IsChecked="{Binding ShowSell}"
                           Content="Sell"
-                          VerticalAlignment="Center"
+                          VerticalAlignment="Center" Margin="0,0,16,0"
                           ToolTip="Include rows where the terminal BUYS from players (player SELLs)." />
+
+                <CheckBox Grid.Column="4"
+                          IsChecked="{Binding ShowUnreachable}"
+                          Content="Show unreachable"
+                          VerticalAlignment="Center"
+                          Foreground="#FFFFCC80"
+                          ToolTip="When unticked (default), rows whose terminal was removed or renamed in a CIG patch (no longer reachable in the current LIVE build) are hidden — they otherwise dominate the top of the list with 400+ day-old data nobody can physically refresh. Tick to inspect them, e.g. if you suspect UEX wrongly flagged a valid terminal as unavailable." />
             </Grid>
         </Border>
 
@@ -136,8 +168,42 @@
                     <DataGridTextColumn Header="System" Width="100"
                                         Binding="{Binding StarSystemName}" />
 
-                    <DataGridTextColumn Header="Terminal" Width="2*"
-                                        Binding="{Binding TerminalName}" />
+                    <DataGridTemplateColumn Header="Terminal" Width="2*" SortMemberPath="TerminalName">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding TerminalName}"
+                                               VerticalAlignment="Center" />
+                                    <!-- Phantom-terminal badge: only shown when the user opted in
+                                         via "Show unreachable" (otherwise these rows are filtered
+                                         out entirely so the badge would never render anyway). -->
+                                    <Border Margin="8,0,0,0"
+                                            Padding="6,1"
+                                            CornerRadius="3"
+                                            Background="#33D97706"
+                                            BorderBrush="#FFD97706"
+                                            BorderThickness="1"
+                                            VerticalAlignment="Center"
+                                            ToolTip="This terminal is no longer reachable in the current LIVE build (decommissioned, renamed, or purged from the UEX catalog after a CIG patch). Its prices cannot be refreshed by datarunners.">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsReachable}" Value="False">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="⚠ unreachable"
+                                                   FontSize="10"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#FFFFCC80" />
+                                    </Border>
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
 
                     <DataGridTextColumn Header="Commodity" Width="*"
                                         Binding="{Binding CommodityName}" />

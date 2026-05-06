@@ -26,6 +26,21 @@ public sealed class StaleTarget
     /// </summary>
     public string? StarSystemName { get; set; }
 
+    /// <summary>
+    /// True when the terminal still exists in the current LIVE build (i.e. the
+    /// player can physically fly there and update prices). False when the
+    /// terminal is missing from the catalog (purged) or marked
+    /// <c>is_available_live = 0</c> by UEX (decommissioned / renamed across
+    /// patches). UEX still returns 400+ day-old rows for those phantom
+    /// terminals via <c>commodities_prices_all</c>; we hide them by default
+    /// because no datarunner can refresh them.
+    ///
+    /// Mutable on purpose: enriched in <c>StaleTargetProvider.EnrichWithCatalog</c>
+    /// the same way as <see cref="StarSystemName"/>, so we can re-evaluate after
+    /// a delayed catalog refresh without rebuilding the whole list.
+    /// </summary>
+    public bool IsReachable { get; set; } = true;
+
     /// <summary>BUY (terminal sells to player) or SELL (player sells to terminal).</summary>
     public required StaleTargetType Type { get; init; }
 

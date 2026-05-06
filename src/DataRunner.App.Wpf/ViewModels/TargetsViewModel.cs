@@ -41,8 +41,23 @@ public sealed partial class TargetsViewModel : ObservableObject
     [ObservableProperty] private bool _showOnlyOver30Days;
     [ObservableProperty] private bool _showBuy = true;
     [ObservableProperty] private bool _showSell = true;
+
+    /// <summary>
+    /// When false (default), rows whose terminal is no longer in the LIVE build
+    /// (decommissioned / renamed / purged from the UEX catalog) are hidden — they
+    /// otherwise dominate the top of the list with 400+ day-old data nobody can
+    /// physically refresh. When true, those rows reappear with a "⚠ unreachable"
+    /// badge so power users can still inspect them (useful if UEX wrongly marks a
+    /// valid terminal as unavailable).
+    /// </summary>
+    [ObservableProperty] private bool _showUnreachable;
+
     [ObservableProperty] private int _totalCount;
     [ObservableProperty] private int _filteredCount;
+
+    /// <summary>How many rows in <see cref="AllTargets"/> are flagged unreachable, regardless of current filters.</summary>
+    [ObservableProperty] private int _unreachableTotal;
+
     [ObservableProperty] private DateTimeOffset? _lastRefreshedAt;
 
     public TargetsViewModel(IStaleTargetProvider provider, ILogger<TargetsViewModel> logger)
@@ -127,8 +142,14 @@ public sealed partial class TargetsViewModel : ObservableObject
     private void ReloadFromProvider()
     {
         AllTargets.Clear();
-        foreach (var t in _provider.Targets) AllTargets.Add(t);
+        var unreachable = 0;
+        foreach (var t in _provider.Targets)
+        {
+            AllTargets.Add(t);
+            if (!t.IsReachable) unreachable++;
+        }
         TotalCount = AllTargets.Count;
+        UnreachableTotal = unreachable;
         LastRefreshedAt = _provider.LastRefreshedAt;
         View.Refresh();
         UpdateFilteredCount();
@@ -137,6 +158,10 @@ public sealed partial class TargetsViewModel : ObservableObject
     private bool FilterPredicate(object o)
     {
         if (o is not StaleTarget t) return false;
+
+        // Hide phantom (decommissioned / purged-from-catalog) terminals by default.
+        // The user can opt-in via the "Show unreachable" toggle.
+        if (!t.IsReachable && !ShowUnreachable) return false;
 
         if (ShowOnlyOver30Days && t.DaysStale < 30) return false;
 
@@ -167,6 +192,7 @@ public sealed partial class TargetsViewModel : ObservableObject
     partial void OnShowOnlyOver30DaysChanged(bool value) => RefreshView();
     partial void OnShowBuyChanged(bool value) => RefreshView();
     partial void OnShowSellChanged(bool value) => RefreshView();
+    partial void OnShowUnreachableChanged(bool value) => RefreshView();
 
     private void RefreshView()
     {

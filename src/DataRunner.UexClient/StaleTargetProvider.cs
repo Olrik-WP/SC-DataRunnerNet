@@ -61,21 +61,44 @@ public sealed class StaleTargetProvider : IStaleTargetProvider
     }
 
     /// <summary>
-    /// Looks up <see cref="StaleTarget.StarSystemName"/> for every record from the
-    /// terminals catalog. Mutates the list in place. Returns true if at least one
-    /// record was updated, so callers can decide whether to re-broadcast Refreshed.
+    /// Looks up <see cref="StaleTarget.StarSystemName"/> and resolves
+    /// <see cref="StaleTarget.IsReachable"/> for every record from the terminals
+    /// catalog. Mutates the list in place. Returns true if at least one record
+    /// was updated, so callers can decide whether to re-broadcast Refreshed.
+    ///
+    /// Reachability rules (mirror what UEX does on /data/monitor):
+    ///  • terminal absent from <c>/terminals/?type=commodity</c> → unreachable
+    ///    (purged from catalog after a CIG patch).
+    ///  • terminal present but <c>is_available_live = 0</c> → unreachable
+    ///    (decommissioned / renamed / PTU-only — datarunner cannot fly there).
+    /// While the catalog is still cold (empty), we abstain: leaves IsReachable
+    /// at its default value of true so we don't hide the whole list during
+    /// startup. The next catalog Refreshed event re-runs this logic.
     /// </summary>
     private bool EnrichWithCatalog(IList<StaleTarget> targets)
     {
         var changed = false;
+        var catalogHasData = _catalog.CommodityTerminals.Count > 0;
+
         foreach (var t in targets)
         {
             var terminal = _catalog.GetTerminal(t.IdTerminal);
+
             var sys = terminal?.StarSystemName;
             if (!string.Equals(t.StarSystemName, sys, StringComparison.Ordinal))
             {
                 t.StarSystemName = sys;
                 changed = true;
+            }
+
+            if (catalogHasData)
+            {
+                var reachable = terminal is not null && terminal.IsAvailableLive != 0;
+                if (t.IsReachable != reachable)
+                {
+                    t.IsReachable = reachable;
+                    changed = true;
+                }
             }
         }
         return changed;

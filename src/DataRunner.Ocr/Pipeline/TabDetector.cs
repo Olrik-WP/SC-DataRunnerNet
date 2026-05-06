@@ -63,10 +63,17 @@ public static class TabDetector
     /// least this much saturation before we commit to a result. If
     /// both labels are below this floor, neither is meaningfully
     /// "highlighted" and we return Unknown — protects the smaller
-    /// margin above against false positives on screenshots that
-    /// aren't an SC commodity terminal at all (corrupted captures,
-    /// other game UIs, etc.).</summary>
-    private const double MinActiveSaturation = 40.0;
+    /// <see cref="DecisionMargin"/> above against false positives on
+    /// screenshots that aren't an SC commodity terminal at all
+    /// (corrupted captures, other game UIs, etc.).
+    ///
+    /// Calibrated from real captures: a Seraphim Station SELL screen
+    /// produced sellSat=39.2 vs buySat=19.3 — a clean 2× ratio that
+    /// our previous 40-floor rejected as "both grey". 25 is the new
+    /// floor; it accepts the dim active labels seen on amber-themed
+    /// stations while still rejecting pure-noise images (saturation
+    /// stays below 10 for non-SC content).</summary>
+    private const double MinActiveSaturation = 25.0;
 
     /// <summary>HSV-V threshold (0..255) above which a pixel is treated
     /// as "text-bright". Below this is dark glow / panel background that
