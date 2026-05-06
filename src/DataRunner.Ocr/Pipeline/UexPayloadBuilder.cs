@@ -35,6 +35,23 @@ public static class UexPayloadBuilder
             payload.Meta.Warnings.Add("id_terminal=0: NEVER submit until terminal is reviewed by a human.");
         }
 
+        // Tab=Unknown means the colour-based detector couldn't decide BUY vs
+        // SELL (eg. low saturation gap on amber-themed Pyro stations). The
+        // editor view raises a BLOCKING validation error for this case so
+        // the payload never reaches UEX — but headless / diagnostic callers
+        // of this builder must also see the issue clearly. Tag the meta so
+        // they can fail fast instead of silently mirroring SELL prices into
+        // the BUY column.
+        if (s.Tab == TerminalTab.Unknown)
+        {
+            payload.Meta.Warnings.Add("tab=unknown: side could not be auto-detected from screenshot. The user MUST pick Buy or Sell in the editor before submission.");
+            payload.Meta.NeedsReview.Add("tab_unknown");
+        }
+
+        // The Buy column is the safe default ONLY for headless drafts that
+        // the user will review in the editor. The ViewModel.BuildPayload
+        // path has its own hard guard that throws if Tab is still Unknown
+        // at submit time, so a malformed draft can't reach UEX undetected.
         var isBuyTab = s.Tab is TerminalTab.Buy or TerminalTab.Unknown;
 
         foreach (var row in s.Prices)

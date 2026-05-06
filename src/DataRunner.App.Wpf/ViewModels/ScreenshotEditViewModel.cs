@@ -87,7 +87,22 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     /// </summary>
     public bool HasSelectedTerminal => SelectedTerminal is not null;
     [ObservableProperty] private bool _isTerminalDropDownOpen;
-    [ObservableProperty] private TerminalTab _tab = TerminalTab.Buy;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsTabUndetected))]
+    private TerminalTab _tab = TerminalTab.Buy;
+
+    /// <summary>
+    /// True when the OCR's colour-based tab detector couldn't decide
+    /// BUY vs SELL. Drives the bright warning banner in the editor that
+    /// directs the user to pick the correct side manually before the
+    /// Send button unlocks. Submitting with the wrong side mirrors the
+    /// price into the wrong UEX column — see the 2026-05-05 Pyro
+    /// Gateway incident report in
+    /// <see cref="HydrateFrom"/>.
+    /// </summary>
+    public bool IsTabUndetected => Tab == TerminalTab.Unknown;
+
     [ObservableProperty] private string _containerSizes = "";
     [ObservableProperty] private string _gameVersion = "";
     [ObservableProperty] private string _details = "";
@@ -432,6 +447,22 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
             });
         }
 
+        // CRITICAL DATA-QUALITY GUARD: if the colour-based tab detector
+        // could not commit to BUY or SELL (eg. low saturation gap on
+        // amber-themed Pyro stations), refuse to submit until the user
+        // makes an explicit pick. This blocks the silent Unknown → Buy
+        // default that previously corrupted six Pyro Gateway SELL
+        // captures into the UEX BUY column on 2026-05-05.
+        if (Tab == TerminalTab.Unknown)
+        {
+            ValidationIssues.Add(new LiveValidationIssue
+            {
+                Severity = LiveValidationSeverity.Error,
+                Code = "tab_unknown",
+                Message = "Buy/Sell tab couldn't be auto-detected from the screenshot — pick the correct side in the TAB dropdown. Submitting with the wrong side pollutes UEX with mirrored prices.",
+            });
+        }
+
         // Per-row checks — produced in row order so the footer reads top-down.
         for (var i = 0; i < Rows.Count; i++)
         {
@@ -650,7 +681,16 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
 
     private void HydrateFrom(ParsedSubmission s)
     {
-        Tab = s.Tab == TerminalTab.Unknown ? TerminalTab.Buy : s.Tab;
+        // CRITICAL: do NOT silently default Unknown → Buy. Doing so caused a
+        // real-world data corruption incident at Pyro Gateway (2026-05-05):
+        // the colour-based tab detector returned Unknown on six SELL captures
+        // because Pyro's amber/orange theme produced a saturation gap below
+        // the decision margin. The previous default sent SELL prices as BUY
+        // prices to UEX without any warning. Keep Tab=Unknown here so the
+        // ComboBox visibly shows "Unknown", RecomputeValidation raises a
+        // BLOCKING error, and BuildPayload refuses to construct a payload —
+        // forcing the user to make an explicit Buy/Sell pick.
+        Tab = s.Tab;
         ContainerSizes = s.ContainerSizes ?? "";
         TerminalMatchScore = s.TerminalMatchScore;
         TerminalSourceField = s.TerminalMatchedField ?? "";
@@ -1114,7 +1154,20 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
 
     private UexDataSubmitPayload BuildPayload()
     {
-        var isBuyTab = Tab is TerminalTab.Buy or TerminalTab.Unknown;
+        // Hard guard against silent Unknown → Buy mirroring. The live
+        // validator already raises a blocking error for this case, so
+        // BuildPayload should never be reached with Tab=Unknown — but a
+        // defence-in-depth check is cheap and prevents future regressions
+        // from re-introducing the 2026-05-05 Pyro corruption pattern.
+        if (Tab == TerminalTab.Unknown)
+        {
+            throw new InvalidOperationException(
+                "Cannot build /data_submit payload while Tab is Unknown. " +
+                "The user must pick BUY or SELL explicitly to avoid mirrored " +
+                "price submissions on UEX.");
+        }
+
+        var isBuyTab = Tab == TerminalTab.Buy;
         var payload = new UexDataSubmitPayload
         {
             IdTerminal = SelectedTerminal?.Id ?? 0,

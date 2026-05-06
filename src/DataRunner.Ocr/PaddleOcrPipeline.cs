@@ -163,11 +163,28 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
                 var scaleFactor = rightPanelWidth > 0
                     ? preprocessed.Width / (double)rightPanelWidth
                     : 1.0;
-                detectedActiveTab = TabDetector.DetectActiveTab(
+                var tabDiagnostic = TabDetector.Diagnose(
                     src, ocrResult.Regions, rightPanelStartX, scaleFactor);
-                _logger.LogInformation(
-                    "Active-tab detection (color-based): {Tab} (scale={Scale:F2})",
-                    detectedActiveTab, scaleFactor);
+                detectedActiveTab = tabDiagnostic.Tab;
+
+                // Log the actual saturation samples even on success — makes
+                // it trivial to triage future "Unknown" cases against past
+                // working captures (eg. the 2026-05-05 Pyro Gateway incident
+                // where the gap fell silently below the decision margin).
+                var buySatLog = tabDiagnostic.BuySaturation?.ToString("F1") ?? "n/a";
+                var sellSatLog = tabDiagnostic.SellSaturation?.ToString("F1") ?? "n/a";
+                if (tabDiagnostic.Tab == TerminalTab.Unknown)
+                {
+                    _logger.LogInformation(
+                        "Active-tab detection: Unknown — buySat={BuySat} sellSat={SellSat} scale={Scale:F2} reason={Reason}",
+                        buySatLog, sellSatLog, scaleFactor, tabDiagnostic.UnknownReason ?? "(none)");
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Active-tab detection: {Tab} — buySat={BuySat} sellSat={SellSat} scale={Scale:F2}",
+                        detectedActiveTab, buySatLog, sellSatLog, scaleFactor);
+                }
             }
         }
 
