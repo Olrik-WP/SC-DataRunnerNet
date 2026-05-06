@@ -110,6 +110,11 @@ public sealed class UexCommodityRoute
     [JsonPropertyName("commodity_name")] public string CommodityName { get; set; } = "";
     [JsonPropertyName("commodity_code")] public string? CommodityCode { get; set; }
 
+    /// <summary>UEX URL slug for the commodity — used to deep-link into the
+    /// commodity's locations_buying / locations_selling tab so the user lands
+    /// on the right side of the trade automatically.</summary>
+    [JsonPropertyName("commodity_slug")] public string? CommoditySlug { get; set; }
+
     [JsonPropertyName("origin_terminal_name")] public string? OriginTerminalName { get; set; }
     [JsonPropertyName("origin_terminal_code")] public string? OriginTerminalCode { get; set; }
 

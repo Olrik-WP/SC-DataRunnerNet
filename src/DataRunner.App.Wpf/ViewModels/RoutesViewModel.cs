@@ -725,47 +725,76 @@ public sealed partial class RoutesViewModel : ObservableObject
         }
     }
 
-    /// <summary>Hyperlink target for the Origin column. Opens the UEX terminal info page.</summary>
+    /// <summary>Hyperlink target for the Origin column. Lands on the UEX page
+    /// that shows where the player can BUY this commodity (origin context),
+    /// auto-selecting the correct tab so the user doesn't have to switch
+    /// between Vente/Achat manually.</summary>
     [RelayCommand]
     private void OpenOriginTerminal(TradeRouteProposal? p)
     {
         if (p is null) return;
-        OpenTerminalInUex(p.Route.IdTerminalOrigin, p.Route.OriginTerminalSlug);
+        OpenRouteSideInUex(p, isDestination: false);
     }
 
-    /// <summary>Hyperlink target for the Destination column. Opens the UEX terminal info page.</summary>
+    /// <summary>Hyperlink target for the Destination column. Lands on the UEX
+    /// page showing where the player can SELL this commodity (destination
+    /// context), so the right tab is open by default.</summary>
     [RelayCommand]
     private void OpenDestinationTerminal(TradeRouteProposal? p)
     {
         if (p is null) return;
-        OpenTerminalInUex(p.Route.IdTerminalDestination, p.Route.DestinationTerminalSlug);
+        OpenRouteSideInUex(p, isDestination: true);
     }
 
     /// <summary>
-    /// Resolves the best available URL for a UEX terminal info page:
-    ///  1. If we know the slug (from the route response or the catalog), use the
-    ///     canonical <c>/commodities/locations/info/{slug}</c> page.
-    ///  2. Otherwise, fall back to the trade-routes page filtered to that terminal,
-    ///     which is what the Targets view already uses elsewhere — guaranteed to
-    ///     work even without a slug.
+    /// Picks the most contextual UEX URL for a click on one side of a route:
+    ///  1. PREFERRED — commodity-centric page filtered to the right tab:
+    ///     <list type="bullet">
+    ///       <item>origin → <c>/commodities/info/name/{slug}/tab/locations_buying/</c>
+    ///         = "where the player can BUY this commodity" — terminal page would
+    ///         require an extra click to reach the equivalent (Vente) section,
+    ///         and the section ID is not URL-anchorable on UEX.</item>
+    ///       <item>destination → <c>/commodities/info/name/{slug}/tab/locations_selling/</c>
+    ///         = "where the player can SELL this commodity".</item>
+    ///     </list>
+    ///     This deep-link surfaces the exact row the route cares about (this
+    ///     terminal) inside the broader market view, which is the most useful
+    ///     context for verifying a price/age before a run.
+    ///  2. FALLBACK — terminal info page <c>/commodities/locations/info/{slug}</c>
+    ///     when the commodity slug is missing (older route caches).
+    ///  3. LAST RESORT — search-results page filtered to the terminal id, when
+    ///     even the terminal slug is unknown (legacy catalog cache).
     /// </summary>
-    private void OpenTerminalInUex(int idTerminal, string? slugFromRoute)
+    private void OpenRouteSideInUex(TradeRouteProposal p, bool isDestination)
     {
         try
         {
-            var slug = !string.IsNullOrWhiteSpace(slugFromRoute)
-                ? slugFromRoute
-                : _catalog.GetTerminal(idTerminal)?.Slug;
+            var commoditySlug = p.Route.CommoditySlug;
+            string url;
 
-            var url = !string.IsNullOrWhiteSpace(slug)
-                ? $"https://uexcorp.space/commodities/locations/info/{Uri.EscapeDataString(slug!)}"
-                : $"https://uexcorp.space/trade/routes?id_terminal_origin={idTerminal}";
+            if (!string.IsNullOrWhiteSpace(commoditySlug))
+            {
+                var tab = isDestination ? "locations_selling" : "locations_buying";
+                url = $"https://uexcorp.space/commodities/info/name/{Uri.EscapeDataString(commoditySlug!)}/tab/{tab}/";
+            }
+            else
+            {
+                var idTerminal = isDestination ? p.Route.IdTerminalDestination : p.Route.IdTerminalOrigin;
+                var slugFromRoute = isDestination ? p.Route.DestinationTerminalSlug : p.Route.OriginTerminalSlug;
+                var slug = !string.IsNullOrWhiteSpace(slugFromRoute)
+                    ? slugFromRoute
+                    : _catalog.GetTerminal(idTerminal)?.Slug;
+
+                url = !string.IsNullOrWhiteSpace(slug)
+                    ? $"https://uexcorp.space/commodities/locations/info/{Uri.EscapeDataString(slug!)}"
+                    : $"https://uexcorp.space/trade/routes?id_terminal_origin={idTerminal}";
+            }
 
             Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not open browser for terminal {Id}.", idTerminal);
+            _logger.LogWarning(ex, "Could not open browser for trade route side (destination={Dest}).", isDestination);
         }
     }
 }
