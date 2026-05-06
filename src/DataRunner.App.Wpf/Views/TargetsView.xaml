@@ -150,6 +150,24 @@
                       AlternatingRowBackground="#10FFFFFF"
                       RowBackground="Transparent"
                       Margin="6">
+                <DataGrid.RowStyle>
+                    <Style TargetType="DataGridRow">
+                        <Setter Property="ContextMenu">
+                            <Setter.Value>
+                                <ContextMenu>
+                                    <MenuItem Header="Open trade routes from this terminal in DataRunner"
+                                              Command="{Binding DataContext.OpenRoutesInAppCommand,
+                                                                RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="{Binding}" />
+                                    <MenuItem Header="Open trade routes from this terminal in browser (UEX)"
+                                              Command="{Binding DataContext.OpenRoutesInBrowserCommand,
+                                                                RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="{Binding}" />
+                                </ContextMenu>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </DataGrid.RowStyle>
                 <DataGrid.Columns>
                     <DataGridTemplateColumn Header="Days stale" Width="100" SortMemberPath="DaysStale">
                         <DataGridTemplateColumn.CellTemplate>
@@ -172,8 +190,15 @@
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{Binding TerminalName}"
-                                               VerticalAlignment="Center" />
+                                    <TextBlock VerticalAlignment="Center">
+                                        <Hyperlink Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                   Command="{Binding DataContext.OpenTerminalInBrowserCommand,
+                                                                     RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                   CommandParameter="{Binding}"
+                                                   ToolTip="Open this terminal's page on uexcorp.space">
+                                            <Run Text="{Binding TerminalName, Mode=OneWay}" />
+                                        </Hyperlink>
+                                    </TextBlock>
                                     <!-- Phantom-terminal badge: only shown when the user opted in
                                          via "Show unreachable" (otherwise these rows are filtered
                                          out entirely so the badge would never render anyway). -->

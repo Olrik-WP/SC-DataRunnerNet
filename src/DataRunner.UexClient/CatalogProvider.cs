@@ -139,6 +139,18 @@ public sealed class CatalogProvider : ICatalogProvider
 
             if (commEnv is null || termEnv is null) return;
 
+            // Schema check: legacy caches (pre-scope-aware Trade Routes) didn't
+            // serialize id_orbit / id_planet / id_star_system. If the entire
+            // terminals list has every hierarchy ID at 0, the cache predates
+            // the new schema — drop it so the next refresh repopulates.
+            if (termEnv.Data.Count > 0 && termEnv.Data.All(t =>
+                t.IdOrbit == 0 && t.IdPlanet == 0 && t.IdStarSystem == 0))
+            {
+                _logger.LogInformation(
+                    "UEX catalog cache predates orbit/planet schema; discarding to force refresh.");
+                return;
+            }
+
             lock (_gate)
             {
                 Commodities = commEnv.Data;

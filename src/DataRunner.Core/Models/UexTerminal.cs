@@ -10,9 +10,24 @@ public sealed class UexTerminal
     [JsonPropertyName("displayname")] public string DisplayName { get; set; } = "";
     [JsonPropertyName("nickname")] public string Nickname { get; set; } = "";
     [JsonPropertyName("code")] public string Code { get; set; } = "";
+    [JsonPropertyName("slug")] public string? Slug { get; set; }
     [JsonPropertyName("type")] public string Type { get; set; } = "";
+
+    // Hierarchy IDs — needed by /commodities_routes when querying at orbit /
+    // planet / star-system level instead of a single terminal. Defaults to 0
+    // when UEX hasn't classified the parent at that level.
+    [JsonPropertyName("id_star_system")] public int IdStarSystem { get; set; }
+    [JsonPropertyName("id_planet")] public int IdPlanet { get; set; }
+    [JsonPropertyName("id_orbit")] public int IdOrbit { get; set; }
+    [JsonPropertyName("id_moon")] public int IdMoon { get; set; }
+    [JsonPropertyName("id_space_station")] public int IdSpaceStation { get; set; }
+    [JsonPropertyName("id_city")] public int IdCity { get; set; }
+    [JsonPropertyName("id_outpost")] public int IdOutpost { get; set; }
+
     [JsonPropertyName("star_system_name")] public string? StarSystemName { get; set; }
     [JsonPropertyName("planet_name")] public string? PlanetName { get; set; }
+    [JsonPropertyName("orbit_name")] public string? OrbitName { get; set; }
+    [JsonPropertyName("moon_name")] public string? MoonName { get; set; }
     [JsonPropertyName("space_station_name")] public string? SpaceStationName { get; set; }
     [JsonPropertyName("outpost_name")] public string? OutpostName { get; set; }
     [JsonPropertyName("city_name")] public string? CityName { get; set; }

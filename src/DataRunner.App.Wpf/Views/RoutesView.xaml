@@ -1,0 +1,506 @@
+<UserControl x:Class="DataRunner.App.Views.RoutesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:DataRunner.App.ViewModels"
+             xmlns:abs="clr-namespace:DataRunner.Core.Abstractions;assembly=DataRunner.Core"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             d:DataContext="{d:DesignInstance Type=vm:RoutesViewModel}"
+             mc:Ignorable="d"
+             xml:lang="en-US">
+
+    <Grid Margin="32,24,32,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- HEADER -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="Trade routes"
+                           FontSize="28" FontWeight="SemiBold" />
+                <TextBlock Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap">
+                    <Run Text="Profitable trade routes from UEX, sorted by a combined trader / datarunner score. Use the slider to balance profit vs the age of the stale-data refreshes you'd unlock at each endpoint." />
+                </TextBlock>
+            </StackPanel>
+            <ui:Button DockPanel.Dock="Right" HorizontalAlignment="Right"
+                       VerticalAlignment="Top"
+                       Appearance="Secondary"
+                       Command="{Binding RefreshCommand}"
+                       Padding="14,7"
+                       ToolTip="Forces a fresh fetch from UEX (commodities_routes + chained stale baseline). Throttled to once every 60s.">
+                <StackPanel Orientation="Horizontal">
+                    <ui:ProgressRing IsIndeterminate="True"
+                                     Width="14" Height="14"
+                                     Margin="0,0,6,0"
+                                     Visibility="{Binding IsRefreshing, Converter={StaticResource BoolToVisibility}}" />
+                    <ui:SymbolIcon Symbol="ArrowSync24" Margin="0,0,6,0"
+                                   Visibility="{Binding IsRefreshing, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+                    <TextBlock Text="Refresh from UEX" />
+                </StackPanel>
+            </ui:Button>
+        </DockPanel>
+
+        <!-- INFO BANNER -->
+        <Border Grid.Row="1" Padding="12,8" Margin="0,0,0,12"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                CornerRadius="6">
+            <StackPanel Orientation="Horizontal">
+                <ui:SymbolIcon Symbol="Info24" Margin="0,0,8,0" Opacity="0.7" />
+                <TextBlock VerticalAlignment="Center" Opacity="0.85">
+                    <Run Text="Source: " />
+                    <Run Text="GET /commodities_routes" FontFamily="Consolas" />
+                    <Run Text=" — cached locally for 30 min. Last refresh: " />
+                    <Run Text="{Binding LastRefreshedAt, Converter={StaticResource RelativeTime}, Mode=OneWay}" FontWeight="SemiBold" />
+                    <Run Text=". Showing " />
+                    <Run Text="{Binding FilteredCount, Mode=OneWay}" FontWeight="SemiBold" />
+                    <Run Text=" of " />
+                    <Run Text="{Binding TotalCount, Mode=OneWay}" />
+                    <Run Text=" routes." />
+                </TextBlock>
+                <TextBlock Text="{Binding StatusMessage}"
+                           Margin="16,0,0,0" Opacity="0.6"
+                           VerticalAlignment="Center"
+                           FontStyle="Italic" />
+                <TextBlock Margin="16,0,0,0" Opacity="0.7"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold"
+                           Foreground="#FF9DD9F0"
+                           Text="{Binding OriginScopeLabel, StringFormat='Filtering: {0}'}"
+                           ToolTip="Effective UEX filter applied to /commodities_routes for the current selection." />
+            </StackPanel>
+        </Border>
+
+        <!-- FILTER BAR (origin / vehicle / investment / destination) -->
+        <Border Grid.Row="2" Padding="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <DockPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,4">
+                    <TextBlock Text="Origin *"
+                               FontWeight="SemiBold" FontSize="11"
+                               VerticalAlignment="Center"
+                               Opacity="0.8" />
+                    <ComboBox DockPanel.Dock="Right" MinWidth="110"
+                              SelectedValuePath="Tag"
+                              SelectedValue="{Binding OriginScope, Mode=TwoWay}"
+                              FontSize="11" Padding="6,1" Margin="8,0,0,0"
+                              VerticalAlignment="Center"
+                              HorizontalAlignment="Right"
+                              ToolTip="Select what UEX filter we send to /commodities_routes:&#10;• Terminal: only this exact shop (e.g. Admin - CRU-L1)&#10;• Orbit: every terminal at the orbit (e.g. all of CRU-L1) — matches the UEX website&#10;• Planet: every terminal at the planet (e.g. Crusader)">
+                        <ComboBoxItem Content="Terminal" Tag="{x:Static abs:RouteScope.Terminal}" />
+                        <ComboBoxItem Content="Orbit" Tag="{x:Static abs:RouteScope.Orbit}" />
+                        <ComboBoxItem Content="Planet" Tag="{x:Static abs:RouteScope.Planet}" />
+                    </ComboBox>
+                </DockPanel>
+                <TextBlock Grid.Row="0" Grid.Column="1"
+                           Text="Vehicle"
+                           FontWeight="SemiBold" FontSize="11"
+                           Margin="12,0,0,4" Opacity="0.8" />
+                <TextBlock Grid.Row="0" Grid.Column="2"
+                           Text="Investment max (aUEC)"
+                           FontWeight="SemiBold" FontSize="11"
+                           Margin="12,0,0,4" Opacity="0.8" />
+                <TextBlock Grid.Row="0" Grid.Column="3"
+                           Text="Destination terminal (optional)"
+                           FontWeight="SemiBold" FontSize="11"
+                           Margin="12,0,0,4" Opacity="0.8" />
+
+                <!-- Origin: editable combo with type-to-search suggestions. -->
+                <ComboBox Grid.Row="1" Grid.Column="0"
+                          IsEditable="True"
+                          IsTextSearchEnabled="False"
+                          StaysOpenOnEdit="True"
+                          ItemsSource="{Binding OriginSuggestions}"
+                          DisplayMemberPath="RichDisplayName"
+                          Text="{Binding OriginSearch, UpdateSourceTrigger=PropertyChanged}"
+                          SelectedItem="{Binding SelectedOrigin, Mode=TwoWay}"
+                          ToolTip="Type a terminal name (e.g. 'CRU-L4', 'Nyx Gateway Stanton'). Required to fetch routes." />
+
+                <ComboBox Grid.Row="1" Grid.Column="1"
+                          MinWidth="220" Margin="12,0,0,0"
+                          ItemsSource="{Binding Vehicles}"
+                          DisplayMemberPath="DisplayLabel"
+                          SelectedItem="{Binding SelectedVehicle, Mode=TwoWay}"
+                          ToolTip="Select your ship to filter out routes whose container sizes don't fit. Leave empty for no constraint." />
+
+                <ui:TextBox Grid.Row="1" Grid.Column="2"
+                            MinWidth="160" Margin="12,0,0,0"
+                            PlaceholderText="e.g. 300000"
+                            Text="{Binding InvestmentMaxUec, UpdateSourceTrigger=LostFocus, TargetNullValue=''}"
+                            ToolTip="Caps routes to those buyable within this UEC budget. Leave empty for no cap." />
+
+                <ComboBox Grid.Row="1" Grid.Column="3"
+                          Margin="12,0,0,0"
+                          IsEditable="True"
+                          IsTextSearchEnabled="False"
+                          StaysOpenOnEdit="True"
+                          ItemsSource="{Binding DestinationSuggestions}"
+                          DisplayMemberPath="RichDisplayName"
+                          Text="{Binding DestinationSearch, UpdateSourceTrigger=PropertyChanged}"
+                          SelectedItem="{Binding SelectedDestination, Mode=TwoWay}"
+                          ToolTip="Optional: pin a single destination terminal. Leave empty to see all destinations from origin." />
+            </Grid>
+        </Border>
+
+        <!-- TRADER ↔ DATARUNNER SLIDER -->
+        <Border Grid.Row="3" Padding="12,10" Margin="0,0,0,12"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                CornerRadius="6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="Trader" FontWeight="SemiBold" VerticalAlignment="Center"
+                               ToolTip="Pure UEX profit ranking. Slider at 0% sorts strictly by profit margin." />
+                </StackPanel>
+                <Slider Grid.Column="1"
+                        Minimum="0" Maximum="100"
+                        Value="{Binding DatarunnerSliderValue, Mode=TwoWay}"
+                        TickFrequency="10"
+                        TickPlacement="BottomRight"
+                        IsSnapToTickEnabled="False"
+                        VerticalAlignment="Center"
+                        ToolTip="Sort weight applied to every row's score:&#10;• 0% (pure Trader) → score = budget-capped profit only (5M aUEC = full saturation).&#10;• 100% (pure Datarunner) → score = 0.7 × max stale age (180 d = full saturation) + 0.3 × stale row count (10+ rows = saturation).&#10;The default 30% favours profit but lifts very-stale routes near the top." />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
+                    <TextBlock Text="Datarunner" FontWeight="SemiBold" VerticalAlignment="Center"
+                               ToolTip="Datarunner-side score blends the AGE of the oldest stale price you'd refresh at this route's endpoints (primary) with the COUNT of stale rows there (secondary). A 320-day route with 2 rows beats a 31-day route with 8 rows." />
+                    <TextBlock Text="{Binding DatarunnerSliderValue, StringFormat='{}  ({0:F0}%)', ConverterCulture=en-US}"
+                               Opacity="0.6" VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- DATAGRID -->
+        <Border Grid.Row="4"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                CornerRadius="6">
+            <Grid>
+                <!-- Placeholder shown when no proposals: either no origin selected
+                     OR origin returned 0 routes (e.g. investment cap too low). -->
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                            MaxWidth="520">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding TotalCount}" Value="0">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                    <ui:SymbolIcon Symbol="Map24" FontSize="48" HorizontalAlignment="Center" Opacity="0.3" />
+                    <TextBlock FontSize="14" FontWeight="SemiBold" Margin="0,12,0,4"
+                               HorizontalAlignment="Center" Opacity="0.85"
+                               TextAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="No trade routes to show" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedOrigin}" Value="{x:Null}">
+                                        <Setter Property="Text" Value="Pick an origin terminal" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBlock FontSize="12" Opacity="0.6" TextWrapping="Wrap"
+                               HorizontalAlignment="Center"
+                               TextAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="Type a terminal name above to see routes from it. Optionally cap investment, pin a destination, or pick your ship to filter by container size." />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedOrigin, Converter={StaticResource BoolToVisibility}}" Value="Visible">
+                                        <Setter Property="Text" Value="UEX returned 0 profitable routes from this origin within the current filters. Try raising the investment cap, removing the optional destination, or picking another origin." />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+
+                <DataGrid ItemsSource="{Binding View}"
+                      AutoGenerateColumns="False"
+                      GridLinesVisibility="None"
+                      HeadersVisibility="Column"
+                      CanUserAddRows="False"
+                      IsReadOnly="True"
+                      Background="Transparent"
+                      AlternatingRowBackground="#10FFFFFF"
+                      RowBackground="Transparent"
+                      Margin="6">
+                <DataGrid.RowStyle>
+                    <Style TargetType="DataGridRow">
+                        <Setter Property="ContextMenu">
+                            <Setter.Value>
+                                <ContextMenu>
+                                    <MenuItem Header="Open in UEX (browser)"
+                                              Command="{Binding DataContext.OpenInBrowserCommand,
+                                                                 RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="{Binding}" />
+                                </ContextMenu>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </DataGrid.RowStyle>
+                <DataGrid.Columns>
+                    <!-- ORIGIN — terminal name is a Hyperlink that opens the UEX terminal info page. -->
+                    <DataGridTemplateColumn Header="Origin" Width="180" SortMemberPath="Route.OriginTerminalName">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="6,4">
+                                    <TextBlock FontWeight="SemiBold">
+                                        <Hyperlink Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                   Command="{Binding DataContext.OpenOriginTerminalCommand,
+                                                                     RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                   CommandParameter="{Binding}"
+                                                   ToolTip="Open this terminal's page on uexcorp.space">
+                                            <Run Text="{Binding Route.OriginTerminalName, Mode=OneWay}" />
+                                        </Hyperlink>
+                                    </TextBlock>
+                                    <TextBlock FontSize="10" Opacity="0.6">
+                                        <Run Text="{Binding Route.OriginPlanetName, Mode=OneWay}" />
+                                        <Run Text=" · " />
+                                        <Run Text="{Binding Route.OriginStarSystemName, Mode=OneWay}" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <!-- DESTINATION — same Hyperlink pattern. -->
+                    <DataGridTemplateColumn Header="Destination" Width="180" SortMemberPath="Route.DestinationTerminalName">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="6,4">
+                                    <TextBlock FontWeight="SemiBold">
+                                        <Hyperlink Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                   Command="{Binding DataContext.OpenDestinationTerminalCommand,
+                                                                     RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                   CommandParameter="{Binding}"
+                                                   ToolTip="Open this terminal's page on uexcorp.space">
+                                            <Run Text="{Binding Route.DestinationTerminalName, Mode=OneWay}" />
+                                        </Hyperlink>
+                                    </TextBlock>
+                                    <TextBlock FontSize="10" Opacity="0.6">
+                                        <Run Text="{Binding Route.DestinationPlanetName, Mode=OneWay}" />
+                                        <Run Text=" · " />
+                                        <Run Text="{Binding Route.DestinationStarSystemName, Mode=OneWay}" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <!-- COMMODITY -->
+                    <DataGridTextColumn Header="Commodity" Width="140"
+                                        Binding="{Binding Route.CommodityName}" />
+
+                    <!-- SCU -->
+                    <DataGridTextColumn Header="SCU"
+                                        Width="60"
+                                        SortMemberPath="EffectiveScu"
+                                        Binding="{Binding EffectiveScu, StringFormat='{}{0:N0}'}"
+                                        ToolTipService.ToolTip="Maximum SCU buyable from the listed origin within the current investment cap. With no cap this equals the full origin stock.">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="HorizontalAlignment" Value="Right" />
+                                <Setter Property="Margin" Value="0,0,12,0" />
+                                <Setter Property="Opacity" Value="0.85" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <!-- INVESTMENT -->
+                    <DataGridTextColumn Header="Invested (aUEC)"
+                                        Width="120"
+                                        SortMemberPath="EffectiveInvestment">
+                        <DataGridTextColumn.Binding>
+                            <Binding Path="EffectiveInvestment" Converter="{StaticResource SmartNumber}" />
+                        </DataGridTextColumn.Binding>
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="HorizontalAlignment" Value="Right" />
+                                <Setter Property="Margin" Value="0,0,12,0" />
+                                <Setter Property="Opacity" Value="0.85" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <!-- PROFIT (budget-capped) -->
+                    <DataGridTextColumn Header="Profit (aUEC)"
+                                        Width="120"
+                                        SortMemberPath="EffectiveProfit">
+                        <DataGridTextColumn.Binding>
+                            <Binding Path="EffectiveProfit" Converter="{StaticResource SmartNumber}" />
+                        </DataGridTextColumn.Binding>
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="HorizontalAlignment" Value="Right" />
+                                <Setter Property="Margin" Value="0,0,12,0" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <!-- ROI -->
+                    <DataGridTextColumn Header="ROI" Width="60"
+                                        Binding="{Binding Route.PriceRoi, StringFormat='{}{0:N0}\%', ConverterCulture=en-US}"
+                                        ToolTipService.ToolTip="ROI per SCU = (sell price − buy price) / buy price. UEX returns this in percent units.">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="HorizontalAlignment" Value="Right" />
+                                <Setter Property="Margin" Value="0,0,12,0" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <!-- DISTANCE -->
+                    <DataGridTextColumn Header="Distance" Width="80"
+                                        Binding="{Binding Route.Distance, StringFormat='{}{0:F1} Gm', ConverterCulture=en-US}">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="HorizontalAlignment" Value="Right" />
+                                <Setter Property="Margin" Value="0,0,12,0" />
+                                <Setter Property="Opacity" Value="0.7" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <!-- CONTAINER SIZES -->
+                    <DataGridTextColumn Header="Containers" Width="100"
+                                        Binding="{Binding Route.ContainerSizesOrigin}">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="FontFamily" Value="Consolas" />
+                                <Setter Property="FontSize" Value="11" />
+                                <Setter Property="Opacity" Value="0.7" />
+                                <Setter Property="Margin" Value="0,0,8,0" />
+                                <Setter Property="ToolTip" Value="Container sizes accepted at the origin terminal (CSV in SCU). The selected vehicle filter hides routes whose set is incompatible." />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <!-- UEX SCORE -->
+                    <DataGridTextColumn Header="Score" Width="60"
+                                        Binding="{Binding Route.Score}">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="HorizontalAlignment" Value="Right" />
+                                <Setter Property="FontFamily" Value="Consolas" />
+                                <Setter Property="Opacity" Value="0.6" />
+                                <Setter Property="Margin" Value="0,0,12,0" />
+                                <Setter Property="ToolTip" Value="UEX-computed qualitative score (higher is better). Treat as opaque ranking; their algorithm crunches volatility, recency and stock." />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <!-- STALE — datarunner overlay. Headline number is the AGE of THIS
+                         commodity's price (buy at origin, sell at destination), so the
+                         displayed value matches what UEX shows on its terminal page for
+                         the exact row you're trading. Tooltip adds the terminal-wide
+                         context (any commodity) for refresh-route planning. -->
+                    <DataGridTemplateColumn Header="Stale" Width="80" SortMemberPath="MaxDaysStaleThisRoute">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Border Margin="6,2" Padding="6,2"
+                                        CornerRadius="4"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="#3322C55E" />
+                                            <Setter Property="BorderBrush" Value="#FF22C55E" />
+                                            <Setter Property="BorderThickness" Value="1" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding MaxDaysStaleThisRoute}" Value="0">
+                                                    <Setter Property="Background" Value="Transparent" />
+                                                    <Setter Property="BorderBrush" Value="Transparent" />
+                                                    <Setter Property="BorderThickness" Value="0" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="↻ "
+                                                   FontWeight="SemiBold"
+                                                   Opacity="0.85"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock FontWeight="SemiBold" VerticalAlignment="Center">
+                                            <Run Text="{Binding MaxDaysStaleThisRoute, Mode=OneWay}" />
+                                            <Run Text="d" FontSize="10" BaselineAlignment="Center" />
+                                        </TextBlock>
+                                        <TextBlock Margin="6,0,0,0"
+                                                   FontSize="10"
+                                                   Opacity="0.65"
+                                                   VerticalAlignment="Center"
+                                                   Text="{Binding TotalStale, StringFormat='({0})'}" />
+                                    </StackPanel>
+                                    <Border.ToolTip>
+                                        <ToolTip>
+                                            <StackPanel MaxWidth="460">
+                                                <TextBlock FontWeight="SemiBold"
+                                                           Text="Stale data — this trade vs. these terminals" />
+                                                <TextBlock Margin="0,4,0,0" TextWrapping="Wrap">
+                                                    <Run Text="The big number (↻ Nd) is the age of THIS commodity's price for THIS trade — buy price at origin, sell price at destination. It matches what UEX shows on the route grid. The number in (parens) is the broader datarunner-refresh count: total commodities ≥30 days old at either terminal, minus what you submitted in the last 6 h." />
+                                                </TextBlock>
+                                                <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" FontSize="11" Opacity="0.85" Text="THIS commodity (matches UEX)" />
+                                                <TextBlock Margin="0,2,0,0" FontFamily="Consolas">
+                                                    <Run Text="Buy  @ origin       : " />
+                                                    <Run Text="{Binding DaysStaleAtOriginThisCommodity, Mode=OneWay}" FontWeight="SemiBold" />
+                                                    <Run Text=" d" />
+                                                    <LineBreak />
+                                                    <Run Text="Sell @ destination  : " />
+                                                    <Run Text="{Binding DaysStaleAtDestinationThisCommodity, Mode=OneWay}" FontWeight="SemiBold" />
+                                                    <Run Text=" d" />
+                                                </TextBlock>
+                                                <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" FontSize="11" Opacity="0.85" Text="Any commodity at these terminals (refresh potential)" />
+                                                <TextBlock Margin="0,2,0,0" FontFamily="Consolas">
+                                                    <Run Text="Origin      — oldest: " />
+                                                    <Run Text="{Binding MaxDaysStaleAtOriginAnyCommodity, Mode=OneWay}" FontWeight="SemiBold" />
+                                                    <Run Text=" d, count ≥30d: " />
+                                                    <Run Text="{Binding StaleAtOrigin, Mode=OneWay}" FontWeight="SemiBold" />
+                                                    <LineBreak />
+                                                    <Run Text="Destination — oldest: " />
+                                                    <Run Text="{Binding MaxDaysStaleAtDestinationAnyCommodity, Mode=OneWay}" FontWeight="SemiBold" />
+                                                    <Run Text=" d, count ≥30d: " />
+                                                    <Run Text="{Binding StaleAtDestination, Mode=OneWay}" FontWeight="SemiBold" />
+                                                    <LineBreak />
+                                                    <Run Text="Excluded (you submitted &lt; 6 h ago): " />
+                                                    <Run Text="{Binding StaleExcludedRecentlySubmitted, Mode=OneWay}" FontWeight="SemiBold" />
+                                                </TextBlock>
+                                                <TextBlock Margin="0,8,0,0" Opacity="0.75" TextWrapping="Wrap" FontStyle="Italic">
+                                                    <Run Text="The 30-day threshold on the (count) matches the Targets view default filter, so the same terminal shows consistent numbers in both screens. Click 'Refresh from UEX' to force-sync the stale baseline (cache TTL is 6 h)." />
+                                                </TextBlock>
+                                            </StackPanel>
+                                        </ToolTip>
+                                    </Border.ToolTip>
+                                </Border>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

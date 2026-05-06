@@ -30,6 +30,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDuplicateChecker, DuplicateChecker>();
         services.AddSingleton<IStaleTargetProvider, StaleTargetProvider>();
         services.AddSingleton<IGameVersionsService, GameVersionsService>();
+        services.AddSingleton<IVehicleCatalog, VehicleCatalog>();
+        services.AddSingleton<ITradeRouteProvider, TradeRouteProvider>();
 
         return services;
     }

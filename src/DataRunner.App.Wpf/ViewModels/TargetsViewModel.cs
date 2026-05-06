@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Threading;
@@ -26,6 +27,7 @@ namespace DataRunner.App.ViewModels;
 public sealed partial class TargetsViewModel : ObservableObject
 {
     private readonly IStaleTargetProvider _provider;
+    private readonly ICatalogProvider _catalog;
     private readonly ILogger<TargetsViewModel> _logger;
     private readonly Dispatcher _uiDispatcher;
 
@@ -60,9 +62,10 @@ public sealed partial class TargetsViewModel : ObservableObject
 
     [ObservableProperty] private DateTimeOffset? _lastRefreshedAt;
 
-    public TargetsViewModel(IStaleTargetProvider provider, ILogger<TargetsViewModel> logger)
+    public TargetsViewModel(IStaleTargetProvider provider, ICatalogProvider catalog, ILogger<TargetsViewModel> logger)
     {
         _provider = provider;
+        _catalog = catalog;
         _logger = logger;
         // Capture the UI dispatcher at construction time. The provider raises
         // Refreshed on whatever thread completed the API call (thread-pool),
@@ -198,5 +201,60 @@ public sealed partial class TargetsViewModel : ObservableObject
     {
         View.Refresh();
         UpdateFilteredCount();
+    }
+
+    /// <summary>
+    /// Raised when the user picks "Open trade routes from this terminal in DataRunner"
+    /// from the row context menu. <see cref="MainViewModel"/> subscribes to this event
+    /// to switch tabs and pre-fill the Routes view's origin terminal — keeps both VMs
+    /// decoupled (TargetsViewModel doesn't reference RoutesViewModel directly).
+    /// </summary>
+    public event EventHandler<int>? OpenRoutesInAppRequested;
+
+    [RelayCommand]
+    private void OpenRoutesInBrowser(StaleTarget? t)
+    {
+        if (t is null) return;
+        try
+        {
+            var url = $"https://uexcorp.space/trade/routes?id_terminal_origin={t.IdTerminal}";
+            Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not open browser for terminal {Id}.", t.IdTerminal);
+        }
+    }
+
+    [RelayCommand]
+    private void OpenRoutesInApp(StaleTarget? t)
+    {
+        if (t is null) return;
+        OpenRoutesInAppRequested?.Invoke(this, t.IdTerminal);
+    }
+
+    /// <summary>
+    /// Hyperlink target for the "Terminal" column. Opens the UEX terminal info
+    /// page in the user's default browser. Prefers the canonical slug-based URL
+    /// (resolved from the catalog) and falls back to the trade-routes page
+    /// filtered by terminal id when the slug isn't known.
+    /// </summary>
+    [RelayCommand]
+    private void OpenTerminalInBrowser(StaleTarget? t)
+    {
+        if (t is null) return;
+        try
+        {
+            var slug = _catalog.GetTerminal(t.IdTerminal)?.Slug;
+            var url = !string.IsNullOrWhiteSpace(slug)
+                ? $"https://uexcorp.space/commodities/locations/info/{Uri.EscapeDataString(slug!)}"
+                : $"https://uexcorp.space/trade/routes?id_terminal_origin={t.IdTerminal}";
+
+            Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not open browser for terminal {Id}.", t.IdTerminal);
+        }
     }
 }

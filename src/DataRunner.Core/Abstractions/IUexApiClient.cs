@@ -25,6 +25,31 @@ public interface IUexApiClient
 
     /// <summary>POST /data_submit. Returns the raw API response body.</summary>
     Task<UexSubmitResult> SubmitDataAsync(UexDataSubmitPayload payload, CancellationToken ct = default);
+
+    /// <summary>
+    /// GET /commodities_routes — UEX's pre-calculated trade routes from a given
+    /// origin, optionally constrained by investment cap, commodity, or destination.
+    /// The <paramref name="originScope"/> selects which UEX filter to apply for
+    /// the origin ID (terminal / orbit / planet) — using <see cref="RouteScope.Orbit"/>
+    /// aggregates all sibling terminals at that orbit (mirrors what the UEX
+    /// website shows when you browse a location), whereas
+    /// <see cref="RouteScope.Terminal"/> restricts the result to a single shop.
+    /// Returns up to 500 rows. Server cache TTL: 30 min. Update frequency: hourly.
+    /// </summary>
+    Task<IReadOnlyList<UexCommodityRoute>> GetCommodityRoutesAsync(
+        int originId,
+        RouteScope originScope = RouteScope.Terminal,
+        int? investment = null,
+        int? idCommodity = null,
+        int? destinationId = null,
+        RouteScope destinationScope = RouteScope.Terminal,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// GET /vehicles — full vehicle catalog (ships and ground vehicles).
+    /// Server cache TTL is 12h. Callers should cache locally for 24h+.
+    /// </summary>
+    Task<IReadOnlyList<UexVehicle>> GetVehiclesAsync(CancellationToken ct = default);
 }
 
 /// <summary>Result of a POST /data_submit request.</summary>

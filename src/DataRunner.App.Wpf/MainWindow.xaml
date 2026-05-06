@@ -75,6 +75,18 @@
                     </ui:Button>
 
                     <ui:Button Appearance="Transparent"
+                               Command="{Binding NavigateRoutesCommand}"
+                               Margin="0,2"
+                               HorizontalContentAlignment="Stretch"
+                               Padding="12,10"
+                               ToolTip="Profitable trade routes from UEX, ranked with our datarunner-aware stale-refresh overlay">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Map24" Margin="0,0,12,0" />
+                            <TextBlock Text="Trade routes" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </ui:Button>
+
+                    <ui:Button Appearance="Transparent"
                                Command="{Binding NavigateHistoryCommand}"
                                Margin="0,2"
                                HorizontalContentAlignment="Stretch"
@@ -123,6 +135,12 @@
                                                 RelativeSource={RelativeSource AncestorType=Window},
                                                 Converter={StaticResource NavTagToVisibility},
                                                 ConverterParameter=targets}" />
+
+                <views:RoutesView DataContext="{Binding Routes}"
+                                  Visibility="{Binding DataContext.SelectedNavTag,
+                                               RelativeSource={RelativeSource AncestorType=Window},
+                                               Converter={StaticResource NavTagToVisibility},
+                                               ConverterParameter=routes}" />
 
                 <views:HistoryView DataContext="{Binding History}"
                                    Visibility="{Binding DataContext.SelectedNavTag,

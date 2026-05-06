@@ -18,6 +18,9 @@ namespace DataRunner.UexClient;
 ///   GET  https://api.uexcorp.space/2.0/terminals/?type=commodity
 ///   GET  https://api.uexcorp.space/2.0/commodities_raw_prices/?id_terminal={id}
 ///   GET  https://api.uexcorp.space/2.0/commodities_prices_all
+///   GET  https://api.uexcorp.space/2.0/commodities_routes?id_terminal_origin={id}[&...]
+///   GET  https://api.uexcorp.space/2.0/vehicles
+///   GET  https://api.uexcorp.space/2.0/game_versions
 ///   POST https://api.uexcorp.space/2.0/data_submit
 ///
 /// Notes from UEX docs:
@@ -122,6 +125,60 @@ public sealed class UexApiClient : IUexApiClient
         public string? Status { get; set; }
         public string? Message { get; set; }
         public UexGameVersions? Data { get; set; }
+    }
+
+    public async Task<IReadOnlyList<UexCommodityRoute>> GetCommodityRoutesAsync(
+        int originId,
+        RouteScope originScope = RouteScope.Terminal,
+        int? investment = null,
+        int? idCommodity = null,
+        int? destinationId = null,
+        RouteScope destinationScope = RouteScope.Terminal,
+        CancellationToken ct = default)
+    {
+        // /commodities_routes requires AT LEAST one origin filter. Pick the
+        // right UEX query-string key based on the requested scope so the user
+        // can either drill into one specific terminal or aggregate every
+        // terminal at the same orbit / planet (mirrors the UEX website).
+        // Optional inputs are appended only when provided to keep the URL
+        // canonical and let UEX cache common queries efficiently (server cache
+        // TTL 30 min).
+        var originKey = originScope switch
+        {
+            RouteScope.Orbit => "id_orbit_origin",
+            RouteScope.Planet => "id_planet_origin",
+            _ => "id_terminal_origin",
+        };
+        var qs = $"?{originKey}={originId}";
+
+        if (investment is { } i && i > 0) qs += $"&investment={i}";
+        if (idCommodity is { } c) qs += $"&id_commodity={c}";
+
+        if (destinationId is { } d)
+        {
+            var destKey = destinationScope switch
+            {
+                RouteScope.Orbit => "id_orbit_destination",
+                RouteScope.Planet => "id_planet_destination",
+                _ => "id_terminal_destination",
+            };
+            qs += $"&{destKey}={d}";
+        }
+
+        var url = $"{BaseUrl}commodities_routes{qs}";
+        _logger.LogInformation("GET {Url}", url);
+        var env = await _http.GetFromJsonAsync<UexEnvelope<UexCommodityRoute>>(url, ReadJson, ct);
+        EnsureOk(env, url);
+        return env!.Data;
+    }
+
+    public async Task<IReadOnlyList<UexVehicle>> GetVehiclesAsync(CancellationToken ct = default)
+    {
+        var url = $"{BaseUrl}vehicles";
+        _logger.LogInformation("GET {Url}", url);
+        var env = await _http.GetFromJsonAsync<UexEnvelope<UexVehicle>>(url, ReadJson, ct);
+        EnsureOk(env, url);
+        return env!.Data;
     }
 
     public async Task<UexSubmitResult> SubmitDataAsync(UexDataSubmitPayload payload, CancellationToken ct = default)

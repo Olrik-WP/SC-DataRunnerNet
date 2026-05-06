@@ -104,6 +104,7 @@ public partial class App : Application
                 services.AddSingleton<HistoryViewModel>();
                 services.AddSingleton<DiagnosticsViewModel>();
                 services.AddSingleton<TargetsViewModel>();
+                services.AddSingleton<RoutesViewModel>();
                 services.AddSingleton<UpdateViewModel>();
                 services.AddSingleton<FirstRunWizardViewModel>();
                 services.AddTransient<ScreenshotEditViewModel>();
