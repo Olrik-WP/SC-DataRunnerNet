@@ -98,6 +98,13 @@ public partial class App : Application
                 services.AddSingleton<ScreenshotFolderWatcher>();
                 services.AddHostedService(sp => sp.GetRequiredService<ScreenshotFolderWatcher>());
 
+                // Smart-split + sequential POST loop for the inbox toolbar's
+                // Send batch flow. Both are stateless apart from their DI
+                // dependencies (catalog + UEX client + history + prefs) so
+                // singleton lifetimes are fine.
+                services.AddSingleton<IBatchPlanner, BatchPlanner>();
+                services.AddSingleton<IBatchSubmitter, BatchSubmitter>();
+
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<InboxViewModel>();
                 services.AddSingleton<SettingsViewModel>();
@@ -147,6 +154,19 @@ public partial class App : Application
         var mainVm = Host.Services.GetRequiredService<MainViewModel>();
         inbox.AttachPreferences(prefs);
         mainVm.AttachPreferences(prefs);
+
+        // Wire the smart-split + sequential POST batch send. The closure owns
+        // the planner / submitter / dialog dependencies so InboxViewModel can
+        // stay decoupled from the submission stack (it's a singleton resolved
+        // very early in the DI graph; pulling those services in via the
+        // constructor would create a heavy startup chain).
+        var batchPlanner = Host.Services.GetRequiredService<IBatchPlanner>();
+        var batchSubmitter = Host.Services.GetRequiredService<IBatchSubmitter>();
+        var dialogService = Host.Services.GetRequiredService<IDialogService>();
+        var gameVersions = Host.Services.GetRequiredService<IGameVersionsService>();
+        inbox.OnSendBatchRequested = async (validatedItems, ct) =>
+            await RunBatchSendAsync(validatedItems, ct, batchPlanner, batchSubmitter,
+                                    dialogService, prefs, gameVersions).ConfigureAwait(true);
 
         await EnsureCatalogReadyAsync();
 
@@ -226,6 +246,124 @@ public partial class App : Application
         {
             Host.Services.GetRequiredService<ILogger<App>>()
                 .LogWarning(ex, "Catalog warm-up failed; UI will retry on demand.");
+        }
+    }
+
+    /// <summary>
+    /// Drives a Send batch run from the inbox to UEX:
+    ///   1. Plan the smart-split (per-terminal, latest-wins commodities).
+    ///   2. Show the mandatory preview dialog. Cancel here = abort, no POST.
+    ///   3. Stream submissions through <see cref="IBatchSubmitter"/>, mirror
+    ///      each progress event onto the matching <see cref="InboxItem.Status"/>
+    ///      so the inbox cards reflect the live state (Sending → Sent / Failed).
+    ///
+    /// Lives on App.xaml.cs (not in InboxViewModel) so the inbox VM doesn't
+    /// take a constructor dependency on the planner / submitter / dialog
+    /// service — those would force the heavy submission stack to resolve
+    /// during early app startup.
+    /// </summary>
+    private static async Task RunBatchSendAsync(
+        IReadOnlyList<ViewModels.InboxItem> validatedItems,
+        CancellationToken ct,
+        IBatchPlanner planner,
+        IBatchSubmitter submitter,
+        IDialogService dialogService,
+        IAppPreferences prefs,
+        IGameVersionsService gameVersions)
+    {
+        var logger = Host.Services.GetRequiredService<ILogger<App>>();
+
+        var plan = planner.Plan(validatedItems);
+        if (plan.Submissions.Count == 0)
+        {
+            dialogService.ShowInfo("Nothing to send",
+                "After the smart-split pass, no submissions remain to be sent.");
+            return;
+        }
+
+        // Mandatory preview — cancellation here means the user changed their
+        // mind, so we just bail without touching any item's status.
+        var previewVm = new ViewModels.BatchPreviewViewModel(plan);
+        var confirmed = await dialogService.ShowBatchPreviewAsync(previewVm).ConfigureAwait(true);
+        if (!confirmed) return;
+
+        // Snapshot the game-version values once at batch start so a single
+        // batch is internally consistent even if /game_versions refreshes
+        // mid-run. Resolve fails for missing PTU build → null (BatchSubmitter
+        // forwards as null → UEX uses its current LIVE/PTU as fallback).
+        string? liveVersion = null;
+        string? ptuVersion = null;
+        try { liveVersion = await gameVersions.ResolveAsync(Core.Models.GameBranch.Live, ct).ConfigureAwait(true); }
+        catch (Exception ex) { logger.LogWarning(ex, "Could not resolve LIVE game version for batch send."); }
+        try { ptuVersion = await gameVersions.ResolveAsync(Core.Models.GameBranch.Ptu, ct).ConfigureAwait(true); }
+        catch (Exception ex) { logger.LogWarning(ex, "Could not resolve PTU game version for batch send."); }
+
+        var options = new BatchOptions(
+            DefaultIsProduction: prefs.DefaultIsProduction,
+            LiveGameVersion: liveVersion,
+            PtuGameVersion: ptuVersion);
+
+        try
+        {
+            await foreach (var progress in submitter.RunAsync(plan, options, ct).ConfigureAwait(true))
+            {
+                ApplyBatchProgressToInbox(progress);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogInformation("Batch send cancelled by user; remaining items kept at their last status.");
+            // Items that never started are still Validated. The currently
+            // Sending one (if any) is finalised by the submitter's foreach
+            // before the OperationCanceledException bubbles.
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Batch send loop crashed unexpectedly.");
+            dialogService.ShowError("Batch send failed",
+                $"The batch send loop crashed unexpectedly:\n\n{ex.Message}\n\nIndividual items keep their last known status; rerun via Retry failed if you want to ship the survivors.");
+        }
+    }
+
+    /// <summary>
+    /// Mirrors a per-item <see cref="BatchProgress"/> event onto the matching
+    /// <see cref="ViewModels.InboxItem"/> so the inbox cards show the live
+    /// progression of the batch in real time.
+    /// </summary>
+    private static void ApplyBatchProgressToInbox(BatchProgress progress)
+    {
+        var item = progress.Item.SourceItem;
+        switch (progress.Phase)
+        {
+            case BatchProgressPhase.Sending:
+                item.Status = ViewModels.InboxStatus.Sending;
+                item.StatusReason = "POST in flight...";
+                break;
+
+            case BatchProgressPhase.Skipped:
+                // No-op submissions (everything deduped away on a stale
+                // screenshot of an already-sent terminal). We tag them as
+                // Sent so the user can prune them with Remove all sent.
+                item.Status = ViewModels.InboxStatus.Sent;
+                item.StatusReason = progress.SkipReason ?? "Skipped (no commodities to send).";
+                break;
+
+            case BatchProgressPhase.Done:
+                var outcome = progress.Outcome!;
+                if (outcome.Ok)
+                {
+                    item.Status = ViewModels.InboxStatus.Sent;
+                    item.StatusReason = outcome.DeletedFiles > 0
+                        ? $"Sent ({outcome.HttpStatusCode}). Cleaned up {outcome.DeletedFiles} screenshot(s)."
+                        : $"Sent ({outcome.HttpStatusCode}).";
+                }
+                else
+                {
+                    item.Status = ViewModels.InboxStatus.Failed;
+                    var apiTag = string.IsNullOrWhiteSpace(outcome.ApiStatus) ? "" : $"[{outcome.ApiStatus}] ";
+                    item.StatusReason = $"Failed ({outcome.HttpStatusCode}). {apiTag}{outcome.Message}";
+                }
+                break;
         }
     }
 

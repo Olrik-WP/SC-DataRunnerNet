@@ -112,6 +112,52 @@
             <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
                 <StackPanel>
 
+                <!-- VALIDATED BANNER — visible only once the user has clicked
+                     "Validate & queue". Communicates the read-only lock and
+                     exposes the inverse "Edit again" command in the same
+                     visual area so it's never hard to find. The form fields
+                     below this banner are disabled via IsEnabled binding on
+                     the wrapper StackPanel so the user CANNOT silently mutate
+                     a Validated item — every edit must go through Edit again. -->
+                <Border Margin="0,0,0,12" Padding="14,10"
+                        CornerRadius="6"
+                        Background="#1F4CAF50" BorderBrush="#664CAF50" BorderThickness="1"
+                        Visibility="{Binding IsValidated, Converter={StaticResource BoolToVisibility}}">
+                    <DockPanel>
+                        <ui:Button DockPanel.Dock="Right"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"
+                                   Appearance="Secondary"
+                                   Padding="12,5"
+                                   Margin="12,0,0,0"
+                                   Command="{Binding EditAgainCommand}"
+                                   ToolTip="Removes the validated lock so you can edit this submission again. The item will leave the next batch send until you re-validate.">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Edit24" Margin="0,0,6,0" />
+                                <TextBlock Text="Edit again" />
+                            </StackPanel>
+                        </ui:Button>
+                        <TextBlock DockPanel.Dock="Left" Text="&#xE73E;"
+                                   FontFamily="Segoe MDL2 Assets" FontSize="18"
+                                   Foreground="#4CAF50" VerticalAlignment="Center"
+                                   Margin="0,0,12,0" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock FontWeight="SemiBold" FontSize="13"
+                                       Foreground="#A5D6A7"
+                                       Text="Validated &#x2014; ready for batch send" />
+                            <TextBlock FontSize="11" Opacity="0.85" TextWrapping="Wrap"
+                                       Text="Fields are locked. Click 'Send batch' in the inbox toolbar to ship every validated screenshot, or 'Edit again' to make changes." />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <!-- EDITABLE FORM WRAPPER — every actual input field lives below
+                     this StackPanel. We gate IsEnabled on CanEditFields so that
+                     once the user clicks "Validate & queue", the entire form
+                     becomes a read-only snapshot until they click "Edit again".
+                     The Validated banner above stays enabled (it owns the
+                     "Edit again" escape hatch). -->
+                <StackPanel IsEnabled="{Binding CanEditFields}">
+
                 <!-- MERGED-ITEM WARNING — visible only when this submission was built
                      from 2+ source screenshots. UEX accepts only ONE screenshot per
                      /data_submit POST, so only the first source image is attached.
@@ -130,10 +176,10 @@
                             <TextBlock FontWeight="SemiBold" FontSize="12">
                                 <Run Text="Merged from " />
                                 <Run Text="{Binding MergedSourceCount, Mode=OneWay}" />
-                                <Run Text=" screenshots — only the FIRST one is sent to UEX." />
+                                <Run Text=" screenshots &#x2014; only the FIRST one is sent to UEX." />
                             </TextBlock>
                             <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Opacity="0.85"
-                                       Text="UEX accepts a single screenshot per submission. While you're in your 90-day evaluation period as a new datarunner, the manual reviewer may reject the submission for commodity rows whose visual evidence isn't on the one attached screenshot. If that happens, submit each screenshot individually until UEX validates you." />
+                                       Text="UEX accepts a single screenshot per submission. While you're in your 90-day evaluation period as a new datarunner, the manual reviewer may reject the submission for commodity rows whose visual evidence isn't on the one attached screenshot. If that happens, submit each screenshot individually until UEX validates you. (Tip: the new Send batch flow does this automatically &#x2014; no need to merge.)" />
                         </StackPanel>
                     </DockPanel>
                 </Border>
@@ -509,6 +555,7 @@
                 </ui:CardExpander>
 
                 </StackPanel>
+                </StackPanel>
             </ScrollViewer>
 
             <!-- Splitter + ScreenshotPanel — both visible only when SideBySideScreenshot is true. -->
@@ -707,21 +754,51 @@
                     </CheckBox>
                 </Border>
 
-                <!-- The send action is the only thing in this row now: the
-                     production-mode toggle lives in Settings and applies to
-                     every screenshot to avoid forgetting to flip it back. -->
+                <!-- Two-button footer:
+                     PRIMARY  : "Validate & queue"  - persists drafts, locks
+                                fields, advances to the next non-validated
+                                item. The user then ships every queued item
+                                via the inbox toolbar's Send batch.
+                     SECONDARY: "Send now"          - one-shot path that goes
+                                straight to UEX (with the existing confirm
+                                dialog). Useful for retries / one-off sends
+                                without going through batch.
+                     The production-mode toggle lives in Settings and applies
+                     to every screenshot to avoid forgetting to flip it back. -->
                 <DockPanel>
-                    <ui:Button DockPanel.Dock="Right"
-                               HorizontalAlignment="Right"
-                               Appearance="Primary"
-                               Padding="22,10"
-                               Command="{Binding SubmitCommand}"
-                               ToolTip="{Binding ValidationSummary}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Send to UEX" FontWeight="SemiBold" />
-                            <ui:SymbolIcon Symbol="ArrowUpload24" Margin="8,0,0,0" />
-                        </StackPanel>
-                    </ui:Button>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <ui:Button Appearance="Secondary"
+                                   Padding="16,10"
+                                   Margin="0,0,8,0"
+                                   Command="{Binding SubmitCommand}"
+                                   ToolTip="Send this screenshot to UEX immediately, without going through the batch queue. The existing confirm dialog still appears.">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Send now" FontWeight="SemiBold" />
+                                <ui:SymbolIcon Symbol="ArrowUpload24" Margin="6,0,0,0" />
+                            </StackPanel>
+                        </ui:Button>
+                        <ui:Button Appearance="Primary"
+                                   Padding="22,10"
+                                   Command="{Binding ValidateCommand}"
+                                   ToolTip="{Binding ValidationSummary}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Validate &amp; queue" FontWeight="SemiBold" />
+                                <ui:SymbolIcon Symbol="Checkmark24" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </ui:Button>
+                    </StackPanel>
+
+                    <!-- Sending indicator (left side) — visible only while a
+                         Send-now POST is in flight. The form is locked via the
+                         IsEnabled wrapper above to avoid concurrent edits. -->
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                Visibility="{Binding IsSending, Converter={StaticResource BoolToVisibility}}">
+                        <ui:ProgressRing IsIndeterminate="True" Width="18" Height="18"
+                                         VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBlock Text="Sending..." FontSize="12" Opacity="0.85"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
                 </DockPanel>
             </StackPanel>
         </Border>

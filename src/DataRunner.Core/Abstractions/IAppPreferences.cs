@@ -129,6 +129,22 @@ public interface IAppPreferences
     /// </summary>
     double RoutesDatarunnerSliderValue { get; set; }
 
+    /// <summary>
+    /// Delay (in milliseconds) inserted between two consecutive POSTs of the
+    /// same batch send. Helps respect UEX's documented rate limits without
+    /// hammering the API:
+    ///   - hard cap: 1000 reports per 30 minutes
+    ///   - per-(terminal, commodity) duplicated_report rule: 5 minutes
+    ///
+    /// 0 disables the throttle (one POST is fired right after the previous
+    /// response lands). The smart-split planner already eliminates intra-batch
+    /// duplicates so a small throttle is mostly there to avoid bursting the
+    /// rate counter when sending dozens of distinct terminals back-to-back.
+    ///
+    /// Default: 1000 (one second between submissions).
+    /// </summary>
+    int BatchSubmissionDelayMs { get; set; }
+
     /// <summary>Persists the current state to disk.</summary>
     Task SaveAsync(CancellationToken ct = default);
 

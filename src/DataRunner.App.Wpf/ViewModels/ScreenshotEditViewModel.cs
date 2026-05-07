@@ -37,6 +37,13 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
 
     private InboxItem? _bound;
     private bool _suspendSearchSync;
+    /// <summary>
+    /// Set to true during <see cref="Load"/> / <see cref="HydrateFrom"/> so the
+    /// auto-invalidation hooks don't fire while we're restoring saved state.
+    /// Without this, loading a Validated item would immediately downgrade it
+    /// back to Ready as the partial setters fire on the hydrated values.
+    /// </summary>
+    private bool _suspendInvalidation;
     /// <summary>Path of the image UEX attaches (always <see cref="InboxItem.ImagePath"/> —
     /// first source for merged items). Side-by-side preview may show another source.</summary>
     private string _primarySubmissionImagePath = "";
@@ -196,6 +203,51 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     private bool _canReRunOcr;
 
     /// <summary>
+    /// True when the user has clicked Validate and the bound item is locked
+    /// for the next batch send. Drives the read-only banner, disables the
+    /// form fields, and toggles the "Validate" / "Edit again" buttons in the
+    /// editor footer. Mirrors <see cref="InboxItem.Status"/>=<see cref="InboxStatus.Validated"/>
+    /// on the bound item.
+    ///
+    /// Auto-cleared (with auto-invalidation of the inbox item) the moment ANY
+    /// editable field changes — defence in depth so a stale validated state
+    /// can never silently slip into a batch send.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEditFields))]
+    [NotifyCanExecuteChangedFor(nameof(ValidateCommand))]
+    [NotifyCanExecuteChangedFor(nameof(EditAgainCommand))]
+    private bool _isValidated;
+
+    /// <summary>
+    /// Bound by the editor view's outer wrapper to gate input on the form
+    /// fields once the item is Validated. The user must click Edit again to
+    /// re-enable editing (which also dévalides the item).
+    /// </summary>
+    public bool CanEditFields => !IsValidated;
+
+    /// <summary>
+    /// Set by the inbox view-model so the editor can request the next
+    /// non-validated item after a successful Validate click. Optional —
+    /// when null we just stay on the current item with the validated
+    /// banner showing.
+    /// </summary>
+    public Action<InboxItem>? OnValidatedRequestNext { get; set; }
+
+    /// <summary>
+    /// True while a Send-now or batch send is in flight against the bound
+    /// item. Used by the view to show a small "sending" badge / spinner and
+    /// to gate concurrent clicks. Set externally by InboxViewModel for the
+    /// batch case; set internally by <see cref="SubmitAsync"/> for unitary
+    /// sends.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ValidateCommand))]
+    [NotifyCanExecuteChangedFor(nameof(EditAgainCommand))]
+    private bool _isSending;
+
+    /// <summary>
     /// True if <see cref="SelectedTerminal"/> shares its display name with another
     /// terminal in a different star system. UI surfaces a warning + inline picker.
     /// </summary>
@@ -226,6 +278,7 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     /// unless <see cref="UserOverrideValidation"/> is also true.</summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ValidateCommand))]
     private bool _hasBlockingErrors;
 
     /// <summary>
@@ -236,6 +289,7 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ValidateCommand))]
     private bool _userOverrideValidation;
 
     /// <summary>Concise summary line for the footer (e.g. "2 errors · 1 warning").</summary>
@@ -299,6 +353,9 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
             foreach (EditableRow r in e.OldItems) r.PropertyChanged -= OnAnyRowPropertyChanged;
         if (e.NewItems is not null)
             foreach (EditableRow r in e.NewItems) r.PropertyChanged += OnAnyRowPropertyChanged;
+        // Adding / removing rows is a real edit — auto-dévalide so the user
+        // re-confirms before the next batch send.
+        InvalidateIfValidated("rows-changed");
         RecomputeValidation();
     }
 
@@ -312,7 +369,35 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         {
             return;
         }
+        InvalidateIfValidated($"row-prop:{e.PropertyName}");
         RecomputeValidation();
+    }
+
+    /// <summary>
+    /// Drops the Validated lock on the bound item if it was set. Called from
+    /// every editable-field change handler so a single edit immediately
+    /// removes the item from the next batch send (defence in depth against
+    /// silent edits between Validate and Send batch).
+    ///
+    /// <paramref name="reason"/> is logged for debug; the inbox card's status
+    /// reason is also updated to a human-readable explanation so the user
+    /// understands why the green check disappeared.
+    /// </summary>
+    private void InvalidateIfValidated(string reason)
+    {
+        if (_suspendInvalidation) return;
+        if (!IsValidated || _bound is null) return;
+
+        _logger.LogInformation(
+            "Auto-invalidated bound item ({Path}) after edit: {Reason}",
+            _bound.ImagePath, reason);
+
+        IsValidated = false;
+        // Restore the appropriate non-validated status. Items with OCR review
+        // flags fall back to Review; the rest go back to Ready.
+        var hasReviewFlags = _bound.Submission?.NeedsReview is { Count: > 0 };
+        _bound.Status = hasReviewFlags ? InboxStatus.Review : InboxStatus.Ready;
+        _bound.StatusReason = "Edited after validation — re-validate to include in the next batch.";
     }
 
     partial void OnSelectedTerminalChanged(UexTerminal? value)
@@ -332,6 +417,7 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
 
         // Real user pick from the dropdown.
         UserExplicitlyConfirmedTerminal = true;
+        InvalidateIfValidated("terminal-changed");
 
         _suspendSearchSync = true;
         // Surface the FULL hierarchy (shop · station · system) in the search
@@ -366,12 +452,20 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         }
     }
 
-    partial void OnTabChanged(TerminalTab value) => RecomputeValidation();
+    partial void OnTabChanged(TerminalTab value)
+    {
+        InvalidateIfValidated("tab-changed");
+        RecomputeValidation();
+    }
     partial void OnTerminalMatchScoreChanged(double value) => RecomputeValidation();
     partial void OnUserExplicitlyConfirmedTerminalChanged(bool value) => RecomputeValidation();
     partial void OnIsAmbiguousTerminalChanged(bool value) => RecomputeValidation();
     partial void OnSourceImageWidthChanged(int value) => RecomputeValidation();
     partial void OnSourceImageHeightChanged(int value) => RecomputeValidation();
+    partial void OnContainerSizesChanged(string value) => InvalidateIfValidated("container-sizes-changed");
+    partial void OnGameVersionChanged(string value) => InvalidateIfValidated("game-version-changed");
+    partial void OnDetailsChanged(string value) => InvalidateIfValidated("details-changed");
+    partial void OnIsProductionChanged(bool value) => InvalidateIfValidated("is-production-changed");
 
     /// <summary>
     /// Walks the current state and rebuilds the issue list. Cheap (sync, no I/O).
@@ -602,8 +696,21 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     /// Send is enabled when there are no blocking errors OR when the user has
     /// explicitly ticked the override checkbox to bypass the safety net.
     /// The override is per-screenshot and resets on every <see cref="Load"/>.
+    /// Also gated by <see cref="IsSending"/> so a double-click can't fire two
+    /// concurrent POSTs.
     /// </summary>
-    private bool CanSubmit() => !HasBlockingErrors || UserOverrideValidation;
+    private bool CanSubmit() => !IsSending && (!HasBlockingErrors || UserOverrideValidation);
+
+    /// <summary>
+    /// Same gate as <see cref="CanSubmit"/>: we only let the user mark the
+    /// item as Validated when the live validation is green (or the user has
+    /// explicitly overridden it). The Validate button is also disabled when
+    /// the item is already validated — Edit again is what un-locks it.
+    /// </summary>
+    private bool CanValidate() => !IsSending && !IsValidated && (!HasBlockingErrors || UserOverrideValidation);
+
+    /// <summary>Edit again only makes sense once the item is in the Validated lock.</summary>
+    private bool CanEditAgain() => !IsSending && IsValidated;
 
     /// <summary>
     /// Pre-fills the <see cref="GameVersion"/> field with the build number
@@ -695,8 +802,18 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
 
     public void Load(InboxItem item)
     {
+        // Hydration sentinel: any partial-property setter touched between
+        // here and the matching `_suspendInvalidation = false` below MUST
+        // NOT trigger the auto-invalidate safety net. The lock is restored
+        // verbatim from the bound item's status; field changes during the
+        // hydration step are mechanical, not user edits.
+        _suspendInvalidation = true;
         _bound = item;
         CanReRunOcr = true;
+        // Snapshot the bound item's validated lock so the editor opens in the
+        // matching mode. Set BEFORE field hydration so the InvalidateIfValidated
+        // safety net doesn't fire spuriously while we restore values.
+        IsValidated = item.Status == InboxStatus.Validated;
         // Notify the view that the merged-item helpers may have changed: their
         // backing data (_bound.SourcePaths.Count) just changed but the toolkit
         // doesn't auto-detect that because they're computed properties.
@@ -769,6 +886,9 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         }
 
         UpdateTerminalSuggestions();
+        // End of the hydration sentinel: from now on, any partial-property
+        // change is a real user edit and SHOULD trigger auto-invalidation.
+        _suspendInvalidation = false;
     }
 
     /// <summary>
@@ -1089,12 +1209,86 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         // A fresh OCR run is a fresh guess: any prior user confirmation is no
         // longer valid for the new (potentially different) terminal pick.
         UserExplicitlyConfirmedTerminal = false;
+        // Same logic for the validated lock: a fresh OCR result is a fresh
+        // guess — the user MUST re-validate before the item rejoins the
+        // batch send queue.
+        if (IsValidated) IsValidated = false;
         _logger.LogInformation("Manual re-run OCR requested for {Path}", _bound.ImagePath);
         _ocr.Reprocess(_bound);
     }
 
+    /// <summary>
+    /// Marks the bound item as Validated and queues it for the next batch
+    /// send. Persists the in-memory editor state (rows, terminal, drafts)
+    /// into the inbox item via <see cref="SaveDraftToBoundItem"/> so the
+    /// batch sender sees exactly what the user just confirmed.
+    ///
+    /// After saving, asks the inbox view-model to advance to the next
+    /// non-validated item (if any). When no more items need validation we
+    /// stay on the current item with the "Validated — ready for batch send"
+    /// banner so the user can review the lock state.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanValidate))]
+    private void Validate()
+    {
+        if (_bound is null) return;
+
+        // Persist the current editor state into the bound item BEFORE flipping
+        // the status — the batch planner reads InboxItem.Submission, which is
+        // only refreshed by SaveDraftToBoundItem.
+        SaveDraftToBoundItem();
+
+        IsValidated = true;
+        _bound.Status = InboxStatus.Validated;
+        _bound.StatusReason = "Validated — ready for batch send.";
+
+        _logger.LogInformation(
+            "User validated {Path} (terminal={Terminal}, rows={Rows})",
+            _bound.ImagePath, SelectedTerminal?.Id, Rows.Count);
+
+        OnValidatedRequestNext?.Invoke(_bound);
+    }
+
+    /// <summary>
+    /// Removes the Validated lock so the user can edit the form again. Mirrors
+    /// the inverse of <see cref="Validate"/>: the item drops back to Ready /
+    /// Review (depending on whether OCR flagged review issues) and is removed
+    /// from the next batch send until the user re-validates it.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanEditAgain))]
+    private void EditAgain()
+    {
+        if (_bound is null) return;
+
+        IsValidated = false;
+        var hasReviewFlags = _bound.Submission?.NeedsReview is { Count: > 0 };
+        _bound.Status = hasReviewFlags ? InboxStatus.Review : InboxStatus.Ready;
+        _bound.StatusReason = "Editing — re-validate to include in the next batch.";
+    }
+
     [RelayCommand(CanExecute = nameof(CanSubmit))]
     private async Task SubmitAsync()
+    {
+        // Send-now path always tries to flip the local progress flag so the
+        // editor surfaces "Sending…" while UEX is being talked to. Reset on
+        // exit so any failure path leaves the form usable.
+        IsSending = true;
+        try
+        {
+            await SubmitInternalAsync().ConfigureAwait(true);
+        }
+        finally
+        {
+            IsSending = false;
+        }
+    }
+
+    /// <summary>
+    /// Body of the Send-now path. Extracted from <see cref="SubmitAsync"/> so
+    /// the IsSending flag can be cleared in a single finally regardless of
+    /// the dialog/HTTP path taken.
+    /// </summary>
+    private async Task SubmitInternalAsync()
     {
         var payload = BuildPayload();
 

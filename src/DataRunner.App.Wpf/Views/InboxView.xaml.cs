@@ -17,9 +17,21 @@ public partial class InboxView : UserControl
     /// that LOOKS like a dropdown, we trigger it manually here.
     /// </summary>
     private void OnRescanButtonClick(object sender, RoutedEventArgs e)
+        => OpenContextMenuAsDropdown(sender);
+
+    /// <summary>
+    /// Same idea as <see cref="OnRescanButtonClick"/> for the trash button:
+    /// a left-click opens the dropdown menu (Remove selected / all sent /
+    /// all failed / all). We don't bind a default Remove command on the
+    /// button itself anymore — the menu makes the user pick the variant
+    /// explicitly so a stray click can't wipe the inbox.
+    /// </summary>
+    private void OnTrashButtonClick(object sender, RoutedEventArgs e)
+        => OpenContextMenuAsDropdown(sender);
+
+    private static void OpenContextMenuAsDropdown(object sender)
     {
         if (sender is not FrameworkElement fe || fe.ContextMenu is null) return;
-
         fe.ContextMenu.PlacementTarget = fe;
         fe.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
         fe.ContextMenu.IsOpen = true;
