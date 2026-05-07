@@ -1,8 +1,8 @@
 # SC-DataRunner
 
 > An open-source Star Citizen commodity terminal scanner that submits trade
-> data to [UEX Corp](https://uexcorp.space) — fast OCR, manual review, one
-> click. Built in .NET 9 / WPF, ships as a single Windows installer that
+> data to [UEX Corp](https://uexcorp.space) — fast OCR, five-layer validation,
+> one click. Built in .NET 9 / WPF, ships as a single Windows installer that
 > auto-updates itself silently.
 
 [![Release](https://img.shields.io/github/v/release/Olrik-WP/SC-DataRunnerNet?label=release&color=2EA043)](https://github.com/Olrik-WP/SC-DataRunnerNet/releases/latest)
@@ -18,8 +18,7 @@
 
 You take a screenshot of a commodity terminal in Star Citizen → SC-DataRunner
 parses it locally, lets you review every value, then submits the result to
-UEX Corp where the entire SC trading community benefits from up-to-date
-prices.
+UEX Corp where the entire SC trading community benefits from up-to-date prices.
 
 ```
 [Print Screen in SC]      [SC-DataRunner picks it up]         [you click Send]
@@ -40,24 +39,42 @@ ScreenShot-2026-...   →   Inbox card · OCR pipeline    →     UEX /data_subm
 - **Open-source under AGPL-3.0** — you can audit every byte, fork it, run
   your own UEX app, or ship a private build. No closed binaries from a
   random Discord download.
-- **Real validation pipeline** — fuzzy match against the UEX catalog, length
-  penalty to kill the classic "Stims → Tin" false positive, status-leak
-  protection, container-size union across rows, live diff vs. the current
-  UEX price before submission.
-- **Stale-target view** — built-in tab that pulls `commodities_prices_all`
-  from UEX and tells you which `(terminal, commodity)` pairs are most
-  outdated, so you can plan a route that actually helps the database.
+
+- **Built so bad data is harder to send than good data.** Five independent
+  validation gates sit between every screenshot and the UEX API — live editor
+  validation, static payload checks, live price-drift comparison against UEX,
+  a mandatory confirmation dialog with exact JSON preview, and per-item
+  validation required before batch send. See [Validation pipeline](#validation-pipeline--5-gates) for the full breakdown.
+
+- **Batch submission with mandatory preview.** Queue up multiple captures,
+  validate each one individually, then send them all. A preview dialog shows
+  exactly which lines survive deduplication, the JSON body per terminal, the
+  estimated duration, and the throttle delay — before a single POST goes out.
+
+- **Trade Route Planner built in.** A dedicated tab pulls live routes from
+  the UEX API, filters them by your cargo vehicle's container sizes, ranks
+  them by profit, ETA, ROI, or a blended Trader ↔ Datarunner score, and links
+  directly to each origin/destination on UEX.
+
+- **Stale-target view** — built-in tab that pulls commodity prices from UEX
+  and shows which `(terminal, commodity)` pairs are most outdated, so you can
+  plan trips that actually help the database.
+
 - **Side-by-side review** — toggle a docked screenshot panel next to the
   validation form, with click-and-drag pan and mouse-wheel zoom; great
   on ultrawide monitors, still usable on 1080p once the inbox is collapsed.
+
 - **Diagnostics tab + one-click bug report** — copies your version, recent
   log tail, last 5 submissions and prefs to the clipboard, ready to paste
   into a GitHub issue. No screenshots of logs, no zip-and-attach.
+
 - **No Python runtime to install.** Single signed Windows installer, ~50 MB.
   .NET 9 runtime is bundled, you don't need to install anything else.
+
 - **Silent auto-updates** via [Velopack](https://github.com/velopack/velopack) —
   every fix lands in your build the same week it ships, with a discreet
   pill in the status bar so you stay in control of when to apply it.
+
 - **Privacy-first**: OCR runs entirely on your machine, the screenshot file
   is only attached to a UEX submission AFTER you click Send (and you can
   disable that attachment in Settings).
@@ -137,8 +154,8 @@ override at any time).
    the image docked next to the form.
 4. Fix any orange/red row (orange = warning, red = blocking; the override
    checkbox lets you ship anyway after manual review).
-5. Click **Send**. The confirmation dialog shows the live diff vs UEX
-   prices and the exact JSON about to be POSTed. Confirm → done.
+5. Click **Validate**, then **Send**. The confirmation dialog shows the live
+   diff vs UEX prices and the exact JSON about to be POSTed. Confirm → done.
 6. The card moves to **History**, the screenshot is auto-deleted (if
    that preference is on), and your submission counts toward UEX
    datarunner stats.
@@ -146,6 +163,10 @@ override at any time).
 > 💡 **Tip**: open the **Targets** tab first to see which terminals are
 > the most stale — you'll farm the most useful submissions in the same
 > trip.
+
+> 💡 **Batch tip**: validate several captures in a row, then click
+> **Send batch** in the Inbox toolbar. A preview shows you exactly what
+> will be sent and deduplicates overlapping reports automatically.
 
 ---
 
@@ -165,25 +186,40 @@ override at any time).
 ┌─────────────────────────┐
 │ PaddleOcrPipeline       │  3 passes: top banner / left header / right panel
 │ + ImagePreprocessor     │  CLAHE + ×2 upscale + horizontal-region grouping
-│ + RegionLayout          │  reconstruct 2-D layout from per-region bboxes
-│ + aggressive retry      │  re-OCR with stronger preprocessing if a terminal
-└────────────┬────────────┘  name or status came back empty
+│ + TabDetector           │  colour-based BUY/SELL detection (hue/saturation),
+│                         │  independent of OCR text — most reliable guard
+│ + aggressive retry      │  re-OCR with ×3 upscale + stronger CLAHE if a
+└────────────┬────────────┘  terminal name or status came back empty/Unknown
              ↓
 ┌─────────────────────────┐
 │ CommodityParser         │  regex + fuzzy match against the UEX catalog,
 │ + FuzzyMatcher          │  length penalty, status barriers, container UNION,
 │                         │  OutOfStock → SCU=0 fallback
 └────────────┬────────────┘
-             ↓ ParsedSubmission + UexDataSubmitPayload
+             ↓ ParsedSubmission + confidence scores
 ┌─────────────────────────┐
-│ ScreenshotEditViewModel │  live validation, override checkbox, manual edits,
-│ + ScreenshotPanel       │  optional side-by-side screenshot panel
+│ ScreenshotEditViewModel │  GATE 1: live validation (terminal, tab, commodity
+│ + ScreenshotPanel       │  match %, SCU/price/status); override checkbox;
+│                         │  optional side-by-side screenshot panel
 └────────────┬────────────┘
-             ↓ user clicks Send
-┌─────────────────────────┐
-│ ConfirmSubmitDialog     │  validation report + LIVE diff vs UEX prices +
-│ + DuplicateChecker      │  exact wire-JSON preview, FINAL gate before POST
-└────────────┬────────────┘
+             ↓ user clicks Validate, then Send (or Send batch)
+             │
+             │  Individual path                Batch path
+             ├──────────────────────┐   ┌──────────────────────────┐
+             │ GATE 2: PayloadValidator │ │ BatchPlanner: dedup by   │
+             │ GATE 3: DuplicateChecker │ │ (commodity, BUY/SELL)    │
+             │ GATE 4: ConfirmSubmit    │ │ per terminal, latest wins│
+             │         Dialog (JSON     │ │                          │
+             │         preview)         │ │ GATE 4b: BatchPreview    │
+             └──────────┬───────────┘   │ Dialog — table of kept /  │
+                        │               │ deduped lines + JSON per  │
+                        │               │ terminal — mandatory, not  │
+                        │               │ skippable                  │
+                        │               │                            │
+                        │               │ Per-item: Gates 2+3 before │
+                        │               │ each POST; backoff on 429; │
+                        └───────────────┘ Stop/Retry controls        │
+                                          └──────────────────────────┘
              ↓
 ┌─────────────────────────┐
 │ UexApiClient            │  POST /data_submit with secret-key + bearer
@@ -191,15 +227,202 @@ override at any time).
 └─────────────────────────┘
 ```
 
-### Five tabs in the UI
+---
+
+## Validation pipeline — 5 gates
+
+Every submission passes through all of these before a byte reaches UEX.
+**It is deliberately harder to send bad data than to send good data.**
+
+### Gate 1 — Live editor validation
+
+Runs on every keystroke in the editor.
+
+| Condition | Effect |
+|---|---|
+| Unknown BUY/SELL tab | **Hard block** |
+| Ambiguous terminal (same name, multiple systems) | **Hard block** until user explicitly picks the right one |
+| Commodity OCR match < 85 % | **Hard block** |
+| SCU = 0 on a non-Out-of-Stock line | **Hard block** |
+| Missing price or inventory status | **Hard block** |
+| Terminal match < 80 % | Warning |
+| Commodity match 85–99 % | Warning |
+| Image aspect ratio outside ~1.6–2.4 | Warning (OCR quality risk) |
+
+Sending despite errors requires checking **"I have reviewed everything"** —
+a hard, visible override that resets on every new capture load.
+
+### Gate 2 — Static payload validator
+
+Applied to the serialised JSON before any network call:
+
+- Valid terminal ID present in the UEX catalogue
+- No duplicate commodities in one payload
+- No mixed `buy_*` / `sell_*` fields on the same line
+- Inventory statuses within the accepted 1–7 range
+- Price > 50 M → warning; price < 0 → error
+- SCU > 100k → warning; SCU < 0 → error
+- Empty line without `is_missing` flag → warning
+
+### Gate 3 — Live price-drift checker (DuplicateChecker)
+
+1. **Local history check**: same `(terminal, commodity)` submitted
+   successfully within the last 5 minutes → **hard block** (avoids UEX
+   duplicate-rejection errors).
+2. **Live UEX fetch** (`/commodities_raw_prices` for the target terminal):
+   - Network failure → warning, user can proceed blind
+   - Prices identical within 1 % and last remote update < 5 min → **hard block**
+   - Price drift > 30 % vs live UEX value → **hard block**
+   - Drift 5–30 % → warning requiring explicit acknowledgement
+   - Drift < 5 % → informational only
+
+### Gate 4 — Confirmation dialog (individual) / Batch preview dialog (batch)
+
+**Individual send** — `ConfirmSubmitDialog` shows:
+- Full list of validation issues and duplicate-check findings
+- **Exact JSON body** that will be POSTed
+- Production / test mode, game branch (LIVE/PTU), screenshot attachment toggle
+- Send only enabled when all blocks are cleared or explicitly overridden and all warnings acknowledged
+
+**Batch send** — `BatchPreviewDialog` (mandatory, cannot be skipped) shows:
+- Table of **kept vs deduplicated lines** with the reason for each removal (dedup by `(commodity, BUY/SELL)` per terminal — BUY and SELL are never merged; latest capture wins per combination)
+- **Exact JSON per terminal POST**
+- Estimated total duration, configurable throttle delay between POSTs
+- Production mode, game branch, screenshot attachment, delete-after-send toggles
+
+### Gate 5 — UEX rejection mapping
+
+HTTP responses from UEX are parsed and mapped to specific, actionable
+help text: expired token, screenshot older than 90 days, PTU rejection,
+`invalid_game_version`, line count limits, rate-limit (1 000 reports /
+30 min), and more.
+
+---
+
+## Batch submission
+
+The **Send batch** button in the Inbox toolbar is disabled until every queued
+capture has been individually validated — you cannot skip the per-item review
+step.
+
+Once enabled:
+
+1. `BatchPlanner` groups by terminal, deduplicates by `(commodity, BUY/SELL)`,
+   keeping the latest capture per combination.
+2. The mandatory **BatchPreviewDialog** presents the full plan. No POST happens
+   until you confirm.
+3. `BatchSubmitter` sends each item in sequence with the configured inter-POST
+   delay, running Gate 2 + Gate 3 again immediately before each POST.
+4. On HTTP 429 / `too_many_reports` / 5xx, it backs off and retries up to
+   3 times per item.
+5. **Stop batch** cancels remaining items. Items already in-flight finish
+   their current POST gracefully.
+6. **Retry failed** re-queues Failed items as Validated and restarts the
+   batch for those items only.
+
+---
+
+## Trade Route Planner
+
+The **Trade routes** tab pulls live data from the UEX `/commodities_routes`
+endpoint and lets you find the most profitable runs for your ship.
+
+**Filtering**
+
+| Filter | What it does |
+|---|---|
+| Cargo vehicle | Shows only routes whose container sizes fit your ship's cargo grid |
+| Loading dock | Both endpoints must have a loading dock |
+| Auto-load | Both endpoints must have a freight elevator |
+| Legal | Hides routes involving commodities flagged as illegal in the UEX catalogue |
+| Monitored | Both endpoints must be monitored terminals |
+| Space / Ground | Restricts to space-only or ground-only terminal pairs |
+| Refuel | At least one endpoint has a refuelling station |
+| Predicted | At least one price in the route is a predicted (not live-reported) value |
+| Min profit (aUEC) | Hard floor on budget-capped effective profit |
+| Min profit/min (aUEC/min) | Hard floor on profit per minute of quantum travel |
+
+Routes with effective profit ≤ 0 are **always hidden** — this is not a
+toggle, it's a hard rule.
+
+**Columns**
+
+| Column | Notes |
+|---|---|
+| Origin / Destination | Terminal name, station, system |
+| Commodity | The traded good |
+| SCU | Effective SCU given your budget cap |
+| Invested (aUEC) | Capital required |
+| Profit (aUEC) | Budget-capped effective profit |
+| aUEC/min | Profit ÷ quantum-travel ETA — the real efficiency metric. Displayed in compact K/M format; exact value in tooltip |
+| ROI | Return on investment % |
+| Distance | Quantum distance in Gm |
+| ETA | Estimated travel time (distance ÷ 175 Mm/s baseline + 10 s spool) |
+| Containers | Supported container sizes at origin |
+| Score | UEX route score |
+| Stale | Oldest price age at either endpoint |
+
+**Sorting**
+
+Click any column header to sort. Click the **★ icon** in a column header to
+**favourite** it as the persistent default sort (saved across sessions). The
+sort direction is also persisted. When a favourite sort is active, the
+Trader ↔ Datarunner slider is disabled (shown with a red warning banner) since
+the grid is no longer sorting by the DatarunnerScore.
+
+**Trader ↔ Datarunner slider**
+
+When no favourite sort is set, routes are ranked by a composite
+`DatarunnerScore`:
+
+- **Trader side (0%)**: pure budget-capped profit (5M aUEC = full saturation)
+- **Datarunner side (100%)**: 70 % weight on the age of the oldest stale price
+  at either endpoint (180 days = full saturation) + 30 % weight on the count
+  of stale rows (10+ = saturation)
+
+The default is 30 % — profit-first, but stale routes bubble up. The slider
+value is persisted across sessions.
+
+**Other route features**
+
+- Origin and destination search with tokenised multi-field matching (name,
+  station, system, orbit, planet)
+- Investment budget cap (recalculates effective SCU and profit)
+- Manual refresh with throttle guard (warns if re-requested too soon)
+- Data cached locally with TTL to minimise API calls
+- Direct UEX links for origin terminal, destination terminal, and commodity
+  (buying vs selling context)
+- All filters, budget cap, vehicle selection, slider value, and default sort
+  are **persisted across sessions**
+
+---
+
+## Stale Targets
+
+The **Targets** tab fetches commodity prices from UEX and surfaces the
+`(terminal, commodity)` pairs with the oldest data — the submissions that
+help the database most.
+
+- Filterable by text, age threshold (> 30 days), BUY/SELL, and with
+  unreachable or inaccessible terminals hidden by default
+- Right-click → **Open in Trade Routes** pre-fills the origin in the Trade
+  Route Planner
+- Right-click → **Open on UEX** links to the terminal page
+
+---
+
+## How it works (quick tour for contributors)
+
+### Six tabs in the UI
 
 | Tab | What's in it |
 |---|---|
-| **Inbox** | Auto-imported screenshots, OCR status, multi-select + merge, validation editor |
+| **Inbox** | Auto-imported screenshots, OCR status, per-item validation editor, batch send, multi-select delete |
 | **Targets** | Stale `(terminal, commodity)` pairs from UEX, sortable by age — plan a route |
+| **Trade routes** | Live UEX route planner: vehicle filter, 8 pill filters, ETA, profit/min, ★ sort, Trader↔Datarunner slider |
 | **History** | Local audit log of every submission (request + response JSON) |
-| **Diagnostics** | App version, log viewer, recent submission inspector, **one-click bug report** to clipboard |
-| **Settings** | Secret key, bearer token override, screenshots folder, default mode (production/test), preferences |
+| **Diagnostics** | App version, log viewer, submission inspector, **one-click bug report** to clipboard |
+| **Settings** | Secret key, bearer token override, screenshots folder, default mode (production/test), preferences, updates |
 
 ### Project layout
 
@@ -243,6 +466,8 @@ uploads to GitHub Releases, existing users auto-update within hours.
 3. From Settings you choose Download → Apply. The installer streams the
    delta, replaces the binaries on the next restart, no UAC prompt, no
    re-installation, your data dir is preserved.
+4. When no update is pending, the current installed version is always visible
+   as a quiet label in the centre of the status bar.
 
 You can also force a check from `Settings → Updates`. Velopack handles
 rollback if the new build fails to start.
@@ -290,6 +515,9 @@ token leaks, no user data is at risk.
 - Aggressive retry pass (CLAHE clipLimit 4.0, ×3 upscale, unsharp mask)
   re-runs whenever the first pass returned an empty terminal name or any
   Unknown status, and merges results back without overwriting good values.
+- **Colour-based BUY/SELL tab detection**: hue/saturation analysis of the
+  tab area runs independently of OCR text — this is the most reliable guard
+  against the most dangerous class of misreport (sending SELL data as BUY).
 
 ### What still needs your eye
 
@@ -310,19 +538,26 @@ token leaks, no user data is at risk.
 ## Roadmap
 
 ### Done
+
 - ✅ End-to-end OCR pipeline with manual review UI
 - ✅ DPAPI-encrypted credential storage
 - ✅ SQLite submission audit log
 - ✅ Velopack silent auto-update + signed installer
-- ✅ Validation footer with live diff vs UEX prices + override checkbox
+- ✅ Five-gate validation pipeline (live editor, static payload, live price-drift, confirmation dialog, batch preview)
+- ✅ Colour-based BUY/SELL tab detection (independent of OCR text)
 - ✅ Multi-screenshot merge (one terminal, many screenshots → one submission)
 - ✅ Built-in app token embedded at build, override possible in Settings
-- ✅ Stale-target view (Targets tab) — `commodities_prices_all` sorted by age
+- ✅ Stale-target view (Targets tab) — commodity prices sorted by age, with Trade Routes integration
 - ✅ Side-by-side screenshot panel (toggle) + collapsible inbox
 - ✅ Diagnostics tab — log viewer, submission inspector, one-click bug report
 - ✅ Aggressive OCR retry pass for missing terminal names / Unknown status
 - ✅ OutOfStock → SCU=0 inference (no longer a blocking error)
 - ✅ Terminal disambiguation across star systems (e.g. Pyro vs. Stanton)
+- ✅ **Batch submission** — BatchPlanner (dedup by commodity+tab), mandatory BatchPreviewDialog with JSON per terminal, per-item Gate 2+3, backoff on rate limits, Stop / Retry failed controls
+- ✅ **Trade Route Planner** — UEX API integration, cargo vehicle filter, 8 pill filters (Loading, Auto-load, Legal, Monitored, Space, Ground, Refuel, Predicted), Min profit / Min profit-per-minute thresholds, ETA column, aUEC/min column (compact K/M format), ★ favourite sort (persisted), Trader ↔ Datarunner blended scoring slider (persisted), direct UEX links
+- ✅ Hard rule: routes with effective profit ≤ 0 always hidden
+- ✅ Installed version always shown in status bar (even when no update is pending)
+- ✅ All filter, sort, vehicle, budget, and slider preferences persisted across sessions
 
 ### Next — extend coverage to other UEX submission types
 
@@ -395,6 +630,11 @@ Useful starting points:
   is the entry point.
 - Want to tweak the screenshot panel UX? `Views/ScreenshotPanel.xaml(.cs)` —
   it powers both the side-by-side view and the standalone window.
+- Want to add a Trade Route filter or column? `ViewModels/RoutesViewModel.cs`
+  (filter predicate + persistence) and `Views/RoutesView.xaml` (pill toggle
+  or column definition).
+- Want to change batch behaviour? `Services/BatchPlanner.cs` (deduplication
+  logic) and `Services/BatchSubmitter.cs` (execution loop + backoff).
 
 Code style: standard `dotnet format`. The CI runs it on every push.
 
