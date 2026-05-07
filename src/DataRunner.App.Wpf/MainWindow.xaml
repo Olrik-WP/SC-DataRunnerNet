@@ -378,8 +378,19 @@
                                VerticalAlignment="Center" />
                 </StackPanel>
 
-                <!-- Spacer -->
+                <!-- Center: update pill OR quiet version label (never both at once) -->
                 <Grid Grid.Column="1">
+                    <!-- VERSION LABEL: shown when no update pill is active so the
+                         installed version is always readable in the status bar.
+                         Binds to Updates.StatusLabel which returns "v{CurrentVersion}"
+                         at Idle state and "Up to date · v{CurrentVersion}" at UpToDate. -->
+                    <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Text="{Binding Updates.StatusLabel}"
+                               FontSize="11" Opacity="0.45"
+                               Visibility="{Binding Updates.ShowInStatusBar,
+                                            Converter={StaticResource BoolToVisibility},
+                                            ConverterParameter=invert}" />
+
                     <!-- UPDATE PILL: only visible when an update is available,
                          downloading, ready to apply, or has failed. Clicking
                          it advances the next step (download → apply). -->
