@@ -19,6 +19,19 @@ public partial class App : Application
 {
     public static IHost Host { get; private set; } = null!;
 
+    private static Window? _startupSplash;
+
+    /// <summary>
+    /// Borderless splash at 50% of the embedded PNG. Shown before <see cref="OnStartup"/>;
+    /// closed when the main window loads (same timing as the built-in WPF splash auto-close).
+    /// </summary>
+    static App()
+    {
+        var splash = new SplashWindow();
+        _startupSplash = splash;
+        splash.Show();
+    }
+
     public static T Resolve<T>() where T : notnull => Host.Services.GetRequiredService<T>();
 
     /// <summary>
@@ -79,6 +92,18 @@ public partial class App : Application
     private static string ResolveLogsDir() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "SC-DataRunnerNet", "logs");
+
+    private static void CloseStartupSplash()
+    {
+        try
+        {
+            _startupSplash?.Close();
+        }
+        finally
+        {
+            _startupSplash = null;
+        }
+    }
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -193,6 +218,7 @@ public partial class App : Application
             mainVm.NeedsFirstRun = true;
         }
 
+        mainWindow.Loaded += (_, _) => CloseStartupSplash();
         mainWindow.Show();
 
         // Fire-and-forget background update probe. Errors are logged inside

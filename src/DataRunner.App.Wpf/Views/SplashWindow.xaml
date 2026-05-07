@@ -1,0 +1,27 @@
+<Window x:Class="DataRunner.App.Views.SplashWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DataRunner"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStartupLocation="CenterScreen"
+        AllowsTransparency="True"
+        Background="Transparent"
+        SizeToContent="WidthAndHeight">
+    <Border BorderBrush="#FF3F3F46"
+            BorderThickness="1"
+            CornerRadius="10"
+            Background="#FF1C1C1C">
+        <!-- Native splash PNG at 50% scale (LayoutTransform affects layout size). -->
+        <Image Stretch="None"
+               SnapsToDevicePixels="True"
+               RenderOptions.BitmapScalingMode="HighQuality"
+               Source="pack://application:,,,/resources/scdatarunnernet.png">
+            <Image.LayoutTransform>
+                <ScaleTransform ScaleX="0.5" ScaleY="0.5" />
+            </Image.LayoutTransform>
+        </Image>
+    </Border>
+</Window>

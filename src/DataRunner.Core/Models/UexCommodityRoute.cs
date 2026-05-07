@@ -42,6 +42,18 @@ public sealed class UexCommodityRoute
     [JsonPropertyName("price_destination")] public double PriceDestination { get; set; }
 
     /// <summary>
+    /// Number of distinct user-submitted price reports backing
+    /// <c>price_origin</c>. <c>0</c> means UEX has no recent user data for the
+    /// buy side and the price is a predicted/inferred value rather than a
+    /// confirmed report. Used by the "Predicted" filter to surface routes that
+    /// are good datarunner targets (worth visiting to confirm/refresh prices).
+    /// </summary>
+    [JsonPropertyName("price_origin_users_rows")] public int PriceOriginUsersRows { get; set; }
+
+    /// <summary>Same as <see cref="PriceOriginUsersRows"/> but for the sell-side price at destination.</summary>
+    [JsonPropertyName("price_destination_users_rows")] public int PriceDestinationUsersRows { get; set; }
+
+    /// <summary>
     /// Margin as a PERCENTAGE: <c>(price_destination - price_origin) / price_destination × 100</c>.
     /// e.g. UEX returns <c>49.11</c> for an item bought at 229 and sold at 450
     /// (= 49.11% margin on the sell price). NOT a per-SCU UEC amount; do NOT
@@ -98,6 +110,12 @@ public sealed class UexCommodityRoute
     [JsonPropertyName("has_freight_elevator_destination")] public int HasFreightElevatorDestination { get; set; }
     [JsonPropertyName("has_loading_dock_origin")] public int HasLoadingDockOrigin { get; set; }
     [JsonPropertyName("has_loading_dock_destination")] public int HasLoadingDockDestination { get; set; }
+
+    /// <summary>1 = origin terminal has on-site refuelling. Powers the "Refuel" filter.</summary>
+    [JsonPropertyName("has_refuel_origin")] public int HasRefuelOrigin { get; set; }
+
+    /// <summary>1 = destination terminal has on-site refuelling. Powers the "Refuel" filter.</summary>
+    [JsonPropertyName("has_refuel_destination")] public int HasRefuelDestination { get; set; }
 
     [JsonPropertyName("is_monitored_origin")] public int IsMonitoredOrigin { get; set; }
     [JsonPropertyName("is_monitored_destination")] public int IsMonitoredDestination { get; set; }

@@ -39,6 +39,22 @@ public sealed class JsonAppPreferences : IAppPreferences
     public bool SideBySideScreenshot { get; set; } = false;
     public int? RoutesSelectedVehicleId { get; set; }
     public double RoutesDatarunnerSliderValue { get; set; } = 30.0;
+
+    public bool RoutesFilterLoadingDock { get; set; }
+    public bool RoutesFilterFreightElevator { get; set; }
+    public bool RoutesFilterLegal { get; set; }
+    public bool RoutesFilterMonitored { get; set; }
+    public bool RoutesFilterSpace { get; set; }
+    public bool RoutesFilterGround { get; set; }
+    public bool RoutesFilterRefuel { get; set; }
+    public bool RoutesFilterPredicted { get; set; }
+
+    public long? RoutesMinProfit { get; set; }
+    public long? RoutesMinProfitPerMinute { get; set; }
+
+    public string? RoutesDefaultSortMember { get; set; }
+    public int RoutesDefaultSortDirection { get; set; } = 1;
+
     public int BatchSubmissionDelayMs { get; set; } = 1000;
 
     public JsonAppPreferences(string? overridePath = null)
@@ -75,6 +91,18 @@ public sealed class JsonAppPreferences : IAppPreferences
             SideBySideScreenshot = dto.SideBySideScreenshot;
             RoutesSelectedVehicleId = dto.RoutesSelectedVehicleId;
             RoutesDatarunnerSliderValue = dto.RoutesDatarunnerSliderValue;
+            RoutesFilterLoadingDock = dto.RoutesFilterLoadingDock;
+            RoutesFilterFreightElevator = dto.RoutesFilterFreightElevator;
+            RoutesFilterLegal = dto.RoutesFilterLegal;
+            RoutesFilterMonitored = dto.RoutesFilterMonitored;
+            RoutesFilterSpace = dto.RoutesFilterSpace;
+            RoutesFilterGround = dto.RoutesFilterGround;
+            RoutesFilterRefuel = dto.RoutesFilterRefuel;
+            RoutesFilterPredicted = dto.RoutesFilterPredicted;
+            RoutesMinProfit = dto.RoutesMinProfit;
+            RoutesMinProfitPerMinute = dto.RoutesMinProfitPerMinute;
+            RoutesDefaultSortMember = dto.RoutesDefaultSortMember;
+            RoutesDefaultSortDirection = dto.RoutesDefaultSortDirection;
             // Treat 0 in the persisted file as "explicit user override" rather
             // than "missing", since 0 is a valid (no-throttle) value. Negative
             // values would be nonsense; clamp to the default to be defensive.
@@ -108,6 +136,18 @@ public sealed class JsonAppPreferences : IAppPreferences
                 SideBySideScreenshot = SideBySideScreenshot,
                 RoutesSelectedVehicleId = RoutesSelectedVehicleId,
                 RoutesDatarunnerSliderValue = RoutesDatarunnerSliderValue,
+                RoutesFilterLoadingDock = RoutesFilterLoadingDock,
+                RoutesFilterFreightElevator = RoutesFilterFreightElevator,
+                RoutesFilterLegal = RoutesFilterLegal,
+                RoutesFilterMonitored = RoutesFilterMonitored,
+                RoutesFilterSpace = RoutesFilterSpace,
+                RoutesFilterGround = RoutesFilterGround,
+                RoutesFilterRefuel = RoutesFilterRefuel,
+                RoutesFilterPredicted = RoutesFilterPredicted,
+                RoutesMinProfit = RoutesMinProfit,
+                RoutesMinProfitPerMinute = RoutesMinProfitPerMinute,
+                RoutesDefaultSortMember = RoutesDefaultSortMember,
+                RoutesDefaultSortDirection = RoutesDefaultSortDirection,
                 BatchSubmissionDelayMs = BatchSubmissionDelayMs,
             };
             var json = JsonSerializer.Serialize(dto, JsonOpts);
@@ -165,6 +205,45 @@ public sealed class JsonAppPreferences : IAppPreferences
 
         /// <summary>Last Trader↔Datarunner slider position (0..100, default 30).</summary>
         public double RoutesDatarunnerSliderValue { get; set; } = 30.0;
+
+        /// <summary>Trade Routes — pill toggle: keep only routes whose endpoints both have a loading dock.</summary>
+        public bool RoutesFilterLoadingDock { get; set; }
+
+        /// <summary>Trade Routes — pill toggle: keep only routes whose endpoints both expose a freight elevator.</summary>
+        public bool RoutesFilterFreightElevator { get; set; }
+
+        /// <summary>Trade Routes — pill toggle: hide routes trading illegal commodities.</summary>
+        public bool RoutesFilterLegal { get; set; }
+
+        /// <summary>Trade Routes — pill toggle: keep only routes whose endpoints are both monitored.</summary>
+        public bool RoutesFilterMonitored { get; set; }
+
+        /// <summary>Trade Routes — pill toggle: keep only space-station ↔ space-station routes.</summary>
+        public bool RoutesFilterSpace { get; set; }
+
+        /// <summary>Trade Routes — pill toggle: keep only ground ↔ ground routes.</summary>
+        public bool RoutesFilterGround { get; set; }
+
+        /// <summary>Trade Routes — pill toggle: keep only routes where both endpoints offer refuelling.</summary>
+        public bool RoutesFilterRefuel { get; set; }
+
+        /// <summary>Trade Routes — pill toggle: keep only routes with at least one predicted price (0 user reports on a side).</summary>
+        public bool RoutesFilterPredicted { get; set; }
+
+        /// <summary>Trade Routes — minimum effective profit (aUEC) for a route to be displayed. Null = no min.</summary>
+        public long? RoutesMinProfit { get; set; }
+
+        /// <summary>Trade Routes — minimum aUEC/min (efficiency) for a route to be displayed. Null = no min.</summary>
+        public long? RoutesMinProfitPerMinute { get; set; }
+
+        /// <summary>Trade Routes — favourited default sort column path (null = DatarunnerScore fallback).</summary>
+        public string? RoutesDefaultSortMember { get; set; }
+
+        /// <summary>
+        /// Trade Routes — direction for <see cref="RoutesDefaultSortMember"/> (0 = asc, 1 = desc).
+        /// Defaults to 1 (descending) which matches how every numeric column on this view is most useful.
+        /// </summary>
+        public int RoutesDefaultSortDirection { get; set; } = 1;
 
         /// <summary>
         /// Throttle (ms) between two POSTs of the same batch send. Default

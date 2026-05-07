@@ -38,6 +38,10 @@
             <conv:InboxStatusToDotBrushConverter x:Key="InboxStatusToDot" />
             <conv:InventoryStatusToLabelConverter x:Key="InventoryStatusToLabel" />
             <conv:ReferenceEqualsToBoolConverter x:Key="RefEqual" />
+            <conv:StringEqualsToBoolConverter x:Key="StringEquals" />
+            <conv:EtaConverter x:Key="Eta" />
+            <conv:CompactNumberConverter x:Key="CompactNumber" />
+            <conv:StringIsNullOrEmptyToBoolConverter x:Key="StringIsNullOrEmpty" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

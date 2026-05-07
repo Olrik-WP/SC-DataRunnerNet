@@ -10,8 +10,98 @@
              mc:Ignorable="d"
              xml:lang="en-US">
 
+    <UserControl.Resources>
+        <!-- ★ favourite-sort star embedded in every sortable column header.
+             Clicking it toggles "this is my default sort column"; the lit
+             state binds against the VM's DefaultSortMember (compared via
+             the StringEquals converter with the column's SortMemberPath as
+             parameter), and the click routes through ToggleDefaultSortCommand
+             with that same path as parameter. Borderless, no background
+             — it visually disappears against the column header until lit. -->
+        <Style x:Key="SortFavoriteStar" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="2,0" />
+            <Setter Property="Margin" Value="4,0,0,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <!-- 60% white = clearly visible on the dark header background but
+                 still subordinate to the column title text. Earlier 40% was
+                 nearly invisible until lit. -->
+            <Setter Property="Foreground" Value="#AAFFFFFF" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="ToolTip" Value="Favourite this column as the default sort. Persisted across sessions." />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <TextBlock x:Name="StarGlyph"
+                                       Text="☆"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       FontSize="{TemplateBinding FontSize}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="#FFE9C46A" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="StarGlyph" Property="Text" Value="★" />
+                                <Setter Property="Foreground" Value="#FFFFC34D" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Pill-shaped ToggleButton used by the trade-routes filter bar.
+             Mirrors the look of the UEX website pills: rounded full-pill
+             border, transparent fill when off, accent fill when on. Hover
+             gets a subtle tint so the affordance is obvious. Scoped to this
+             view because no other screen needs the pill look (yet). -->
+        <Style x:Key="FilterPillToggle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="#55FFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="14,4" />
+            <Setter Property="Margin" Value="0,0,6,6" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="PillBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="14"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="PillBorder" Property="Background" Value="#15FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="PillBorder" Property="Background" Value="#FF0078D4" />
+                                <Setter TargetName="PillBorder" Property="BorderBrush" Value="#FF0078D4" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
     <Grid Margin="32,24,32,24">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -19,16 +109,21 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- HEADER -->
-        <DockPanel Grid.Row="0" Margin="0,0,0,12">
-            <StackPanel>
+        <!-- HEADER: Grid so title/description cannot starve the Refresh button (DockPanel + wide text measure clipped the last child). -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="0" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,16,0">
                 <TextBlock Text="Trade routes"
                            FontSize="28" FontWeight="SemiBold" />
                 <TextBlock Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap">
                     <Run Text="Profitable trade routes from UEX, sorted by a combined trader / datarunner score. Use the slider to balance profit vs the age of the stale-data refreshes you'd unlock at each endpoint." />
                 </TextBlock>
             </StackPanel>
-            <ui:Button DockPanel.Dock="Right" HorizontalAlignment="Right"
+            <ui:Button Grid.Column="1"
+                       HorizontalAlignment="Left"
                        VerticalAlignment="Top"
                        Appearance="Secondary"
                        Command="{Binding RefreshCommand}"
@@ -44,7 +139,7 @@
                     <TextBlock Text="Refresh from UEX" />
                 </StackPanel>
             </ui:Button>
-        </DockPanel>
+        </Grid>
 
         <!-- INFO BANNER -->
         <Border Grid.Row="1" Padding="12,8" Margin="0,0,0,12"
@@ -76,7 +171,7 @@
             </StackPanel>
         </Border>
 
-        <!-- FILTER BAR (origin / vehicle / investment / destination) -->
+        <!-- FILTER BAR (origin / vehicle / investment / destination + numeric thresholds) -->
         <Border Grid.Row="2" Padding="0,0,0,12">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -86,6 +181,8 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
@@ -154,42 +251,179 @@
                           Text="{Binding DestinationSearch, UpdateSourceTrigger=PropertyChanged}"
                           SelectedItem="{Binding SelectedDestination, Mode=TwoWay}"
                           ToolTip="Optional: pin a single destination terminal. Leave empty to see all destinations from origin." />
+
+                <!-- ROW 2/3: numeric trader-side thresholds. Persisted across
+                     sessions so a user who never wants to see micro-runs
+                     keeps them filtered out without re-typing. -->
+                <TextBlock Grid.Row="2" Grid.Column="0"
+                           Text="Min profit (aUEC)"
+                           FontWeight="SemiBold" FontSize="11"
+                           Margin="0,12,0,4" Opacity="0.8" />
+                <TextBlock Grid.Row="2" Grid.Column="3"
+                           Text="Min profit / minute (aUEC/min)"
+                           FontWeight="SemiBold" FontSize="11"
+                           Margin="12,12,0,4" Opacity="0.8" />
+
+                <ui:TextBox Grid.Row="3" Grid.Column="0"
+                            PlaceholderText="e.g. 50000"
+                            Text="{Binding MinProfit, UpdateSourceTrigger=LostFocus, TargetNullValue=''}"
+                            ToolTip="Hide every route whose budget-capped profit is below this aUEC threshold. Leave empty for no minimum." />
+                <ui:TextBox Grid.Row="3" Grid.Column="3"
+                            Margin="12,0,0,0"
+                            PlaceholderText="e.g. 20000"
+                            Text="{Binding MinProfitPerMinute, UpdateSourceTrigger=LostFocus, TargetNullValue=''}"
+                            ToolTip="Hide routes whose profit per minute of quantum travel is below this aUEC/min threshold. Surfaces efficient runs only — useful when you want short, high-margin trips instead of long hauls. Leave empty for no minimum." />
             </Grid>
         </Border>
 
-        <!-- TRADER ↔ DATARUNNER SLIDER -->
+        <!-- TRADER ↔ DATARUNNER SLIDER
+             Note: the slider ranks rows by recomputing each TradeRouteProposal.DatarunnerScore.
+             That ranking is only EFFECTIVE when the grid sort is on DatarunnerScore (the default).
+             If the user has favourited another column with the ★ icon, the grid sorts on that
+             column instead and the slider becomes visually inert. We keep the slider editable
+             so the user can pre-set it, but we dim it and show a hint so the inertness isn't
+             mistaken for a bug. -->
         <Border Grid.Row="3" Padding="12,10" Margin="0,0,0,12"
-                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                 CornerRadius="6">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
-                    <TextBlock Text="Trader" FontWeight="SemiBold" VerticalAlignment="Center"
-                               ToolTip="Pure UEX profit ranking. Slider at 0% sorts strictly by profit margin." />
-                </StackPanel>
-                <Slider Grid.Column="1"
-                        Minimum="0" Maximum="100"
-                        Value="{Binding DatarunnerSliderValue, Mode=TwoWay}"
-                        TickFrequency="10"
-                        TickPlacement="BottomRight"
-                        IsSnapToTickEnabled="False"
-                        VerticalAlignment="Center"
-                        ToolTip="Sort weight applied to every row's score:&#10;• 0% (pure Trader) → score = budget-capped profit only (5M aUEC = full saturation).&#10;• 100% (pure Datarunner) → score = 0.7 × max stale age (180 d = full saturation) + 0.3 × stale row count (10+ rows = saturation).&#10;The default 30% favours profit but lifts very-stale routes near the top." />
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
-                    <TextBlock Text="Datarunner" FontWeight="SemiBold" VerticalAlignment="Center"
-                               ToolTip="Datarunner-side score blends the AGE of the oldest stale price you'd refresh at this route's endpoints (primary) with the COUNT of stale rows there (secondary). A 320-day route with 2 rows beats a 31-day route with 8 rows." />
-                    <TextBlock Text="{Binding DatarunnerSliderValue, StringFormat='{}  ({0:F0}%)', ConverterCulture=en-US}"
-                               Opacity="0.6" VerticalAlignment="Center" />
-                </StackPanel>
-            </Grid>
+            <!-- Background flips between the standard card colour (slider active)
+                 and a darker, more-muted tone (slider inert). NOTE: do NOT set
+                 Background as a local attribute — local values OUTRANK Style
+                 triggers in WPF, which would freeze the trigger forever. -->
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding DefaultSortMember, Converter={StaticResource StringIsNullOrEmpty}}" Value="False">
+                            <Setter Property="Background" Value="#33000000" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <StackPanel>
+                <!-- TOP banner — shows ABOVE the slider so the explanation is
+                     read FIRST, before the user starts wondering why the
+                     control underneath doesn't respond. WPF rule applied:
+                     Visibility/Background are ONLY set via Style setters (no
+                     local attribute), otherwise the DataTrigger override
+                     would be ignored due to local-value precedence. -->
+                <Border Margin="0,0,0,8"
+                        Padding="12,8"
+                        CornerRadius="4"
+                        BorderThickness="1.5">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Setter Property="Background" Value="#55D32F2F" />
+                            <Setter Property="BorderBrush" Value="#FFFF5252" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding DefaultSortMember, Converter={StaticResource StringIsNullOrEmpty}}" Value="False">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="#FFFFEBEB">
+                        <Run Text="⛔ Slider disabled — favorite sort " />
+                        <Run Text="★ " FontSize="16" FontWeight="Bold" Foreground="#FFFFC34D" />
+                        <Run Text="is active on column " />
+                        <Run Text="{Binding DefaultSortMember, Mode=OneWay}" FontWeight="Bold" Foreground="#FFFFC34D" />
+                        <Run Text=". Click the yellow ★ in that column header to clear it and re-enable Trader ↔ Datarunner ranking." />
+                    </TextBlock>
+                </Border>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="Trader" FontWeight="SemiBold" VerticalAlignment="Center"
+                                   ToolTip="Pure UEX profit ranking. Slider at 0% sorts strictly by profit margin." />
+                    </StackPanel>
+                    <!-- IsEnabled bound to (DefaultSortMember is null/empty) so
+                         the slider gets the standard WPF disabled visual the
+                         moment a column is ★-favourited. The Modern (iNKORE)
+                         theme's disabled-Slider state is too subtle on its own,
+                         so we ALSO crush opacity to 0.35 via a Style trigger.
+                         Combined with the red banner above and the dark panel
+                         background, the disabled state is unmistakable. -->
+                    <Slider Grid.Column="1"
+                            Minimum="0" Maximum="100"
+                            Value="{Binding DatarunnerSliderValue, Mode=TwoWay}"
+                            IsEnabled="{Binding DefaultSortMember, Converter={StaticResource StringIsNullOrEmpty}}"
+                            TickFrequency="10"
+                            TickPlacement="BottomRight"
+                            IsSnapToTickEnabled="False"
+                            VerticalAlignment="Center"
+                            ToolTip="Sort weight applied to every row's DatarunnerScore:&#10;• 0% (pure Trader) → score = budget-capped profit only (5M aUEC = full saturation).&#10;• 100% (pure Datarunner) → score = 0.7 × max stale age (180 d = full saturation) + 0.3 × stale row count (10+ rows = saturation).&#10;The default 30% favours profit but lifts very-stale routes near the top.&#10;&#10;NOTE: the slider only re-orders rows while the grid is sorted by DatarunnerScore. When a column is ★-favourited, the grid sorts on that column instead and the slider is frozen (it still recomputes the score in the background, so ratings come back the moment you un-favourite the column).">
+                        <Slider.Style>
+                            <Style TargetType="Slider" BasedOn="{StaticResource {x:Type Slider}}">
+                                <Setter Property="Opacity" Value="1.0" />
+                                <Style.Triggers>
+                                    <Trigger Property="IsEnabled" Value="False">
+                                        <Setter Property="Opacity" Value="0.35" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Slider.Style>
+                    </Slider>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
+                        <TextBlock Text="Datarunner" FontWeight="SemiBold" VerticalAlignment="Center"
+                                   ToolTip="Datarunner-side score blends the AGE of the oldest stale price you'd refresh at this route's endpoints (primary) with the COUNT of stale rows there (secondary). A 320-day route with 2 rows beats a 31-day route with 8 rows." />
+                        <TextBlock Text="{Binding DatarunnerSliderValue, StringFormat='{}  ({0:F0}%)', ConverterCulture=en-US}"
+                                   Opacity="0.6" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- PILL FILTERS — mirror of the UEX trade-routes page filter bar.
+             All toggles are client-side AND constraints over the cached
+             proposals, persisted across sessions. ToolTips spell out the
+             exact effect so the user never has to guess what a pill does. -->
+        <Border Grid.Row="4" Padding="0,0,0,8">
+            <WrapPanel Orientation="Horizontal">
+                <ToggleButton Style="{StaticResource FilterPillToggle}"
+                              IsChecked="{Binding FilterLoadingDock, Mode=TwoWay}"
+                              Content="Loading"
+                              ToolTip="Keep only routes whose ORIGIN AND DESTINATION both have a loading dock (manual SCU loading via the cargo ramp)." />
+                <ToggleButton Style="{StaticResource FilterPillToggle}"
+                              IsChecked="{Binding FilterFreightElevator, Mode=TwoWay}"
+                              Content="Auto-load"
+                              ToolTip="Keep only routes where both endpoints expose a freight elevator (auto-load through the terminal interface)." />
+                <ToggleButton Style="{StaticResource FilterPillToggle}"
+                              IsChecked="{Binding FilterLegal, Mode=TwoWay}"
+                              Content="Legal"
+                              ToolTip="Hide routes trading illegal commodities (Altruciatoxin, WiDoW, etc.). Looked up against the local commodity catalog." />
+                <ToggleButton Style="{StaticResource FilterPillToggle}"
+                              IsChecked="{Binding FilterMonitored, Mode=TwoWay}"
+                              Content="Monitored"
+                              ToolTip="Keep only routes whose endpoints are monitored terminals (UEX auto-tracks pricing — usually well-curated stations)." />
+                <ToggleButton Style="{StaticResource FilterPillToggle}"
+                              IsChecked="{Binding FilterSpace, Mode=TwoWay}"
+                              Content="Space"
+                              ToolTip="Keep only routes between two space stations (no atmospheric entry on either end)." />
+                <ToggleButton Style="{StaticResource FilterPillToggle}"
+                              IsChecked="{Binding FilterGround, Mode=TwoWay}"
+                              Content="Ground"
+                              ToolTip="Keep only routes between two ground-based terminals." />
+                <ToggleButton Style="{StaticResource FilterPillToggle}"
+                              IsChecked="{Binding FilterRefuel, Mode=TwoWay}"
+                              Content="Refuel"
+                              ToolTip="Keep only routes where both endpoints offer refuelling on-site (full top-off both ways)." />
+                <ToggleButton Style="{StaticResource FilterPillToggle}"
+                              IsChecked="{Binding FilterPredicted, Mode=TwoWay}"
+                              Content="Predicted"
+                              ToolTip="Keep only routes where at least one side has a predicted price (no recent user submissions). Useful for datarunners targeting routes worth confirming." />
+            </WrapPanel>
         </Border>
 
         <!-- DATAGRID -->
-        <Border Grid.Row="4"
+        <Border Grid.Row="5"
                 Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                 CornerRadius="6">
             <Grid>
@@ -247,6 +481,7 @@
                       Background="Transparent"
                       AlternatingRowBackground="#10FFFFFF"
                       RowBackground="Transparent"
+                      Sorting="RoutesGrid_OnSorting"
                       Margin="6">
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
@@ -319,11 +554,19 @@
                                         Binding="{Binding Route.CommodityName}" />
 
                     <!-- SCU -->
-                    <DataGridTextColumn Header="SCU"
-                                        Width="60"
+                    <DataGridTextColumn Width="80"
                                         SortMemberPath="EffectiveScu"
                                         Binding="{Binding EffectiveScu, StringFormat='{}{0:N0}'}"
                                         ToolTipService.ToolTip="Maximum SCU buyable from the listed origin within the current investment cap. With no cap this equals the full origin stock.">
+                        <DataGridTextColumn.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="SCU" />
+                                <ToggleButton Style="{StaticResource SortFavoriteStar}"
+                                              IsChecked="{Binding DataContext.DefaultSortMember, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource StringEquals}, ConverterParameter=EffectiveScu, Mode=OneWay}"
+                                              Command="{Binding DataContext.ToggleDefaultSortCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="EffectiveScu" />
+                            </StackPanel>
+                        </DataGridTextColumn.Header>
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock">
                                 <Setter Property="HorizontalAlignment" Value="Right" />
@@ -334,9 +577,17 @@
                     </DataGridTextColumn>
 
                     <!-- INVESTMENT -->
-                    <DataGridTextColumn Header="Invested (aUEC)"
-                                        Width="120"
+                    <DataGridTextColumn Width="155"
                                         SortMemberPath="EffectiveInvestment">
+                        <DataGridTextColumn.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Invested (aUEC)" />
+                                <ToggleButton Style="{StaticResource SortFavoriteStar}"
+                                              IsChecked="{Binding DataContext.DefaultSortMember, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource StringEquals}, ConverterParameter=EffectiveInvestment, Mode=OneWay}"
+                                              Command="{Binding DataContext.ToggleDefaultSortCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="EffectiveInvestment" />
+                            </StackPanel>
+                        </DataGridTextColumn.Header>
                         <DataGridTextColumn.Binding>
                             <Binding Path="EffectiveInvestment" Converter="{StaticResource SmartNumber}" />
                         </DataGridTextColumn.Binding>
@@ -350,9 +601,17 @@
                     </DataGridTextColumn>
 
                     <!-- PROFIT (budget-capped) -->
-                    <DataGridTextColumn Header="Profit (aUEC)"
-                                        Width="120"
+                    <DataGridTextColumn Width="130"
                                         SortMemberPath="EffectiveProfit">
+                        <DataGridTextColumn.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Profit (aUEC)" />
+                                <ToggleButton Style="{StaticResource SortFavoriteStar}"
+                                              IsChecked="{Binding DataContext.DefaultSortMember, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource StringEquals}, ConverterParameter=EffectiveProfit, Mode=OneWay}"
+                                              Command="{Binding DataContext.ToggleDefaultSortCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="EffectiveProfit" />
+                            </StackPanel>
+                        </DataGridTextColumn.Header>
                         <DataGridTextColumn.Binding>
                             <Binding Path="EffectiveProfit" Converter="{StaticResource SmartNumber}" />
                         </DataGridTextColumn.Binding>
@@ -365,10 +624,53 @@
                         </DataGridTextColumn.ElementStyle>
                     </DataGridTextColumn>
 
+                    <!-- PROFIT / MIN — derived from EstimatedTravelTime. Shows the
+                         REAL efficiency of a route, accounting for travel cost.
+                         Compact format ("57.6K") gets a much better visual scan
+                         than full precision; the raw double stays bound for
+                         sorting purposes and the tooltip shows the exact value. -->
+                    <DataGridTextColumn Width="100"
+                                        SortMemberPath="ProfitPerMinute"
+                                        Binding="{Binding ProfitPerMinute, Converter={StaticResource CompactNumber}}">
+                        <DataGridTextColumn.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="aUEC/min" />
+                                <ToggleButton Style="{StaticResource SortFavoriteStar}"
+                                              IsChecked="{Binding DataContext.DefaultSortMember, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource StringEquals}, ConverterParameter=ProfitPerMinute, Mode=OneWay}"
+                                              Command="{Binding DataContext.ToggleDefaultSortCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="ProfitPerMinute" />
+                            </StackPanel>
+                        </DataGridTextColumn.Header>
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="HorizontalAlignment" Value="Right" />
+                                <Setter Property="Margin" Value="0,0,12,0" />
+                                <Setter Property="Opacity" Value="0.85" />
+                                <Setter Property="ToolTipService.ToolTip">
+                                    <Setter.Value>
+                                        <MultiBinding StringFormat="Exact: {0:N2} aUEC/min&#10;&#10;Effective profit divided by quantum-travel ETA. Higher = more efficient. Routes with distance=0 (intra-station) display the raw profit since travel is instant.">
+                                            <Binding Path="ProfitPerMinute" />
+                                        </MultiBinding>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
                     <!-- ROI -->
-                    <DataGridTextColumn Header="ROI" Width="60"
+                    <DataGridTextColumn Width="75"
+                                        SortMemberPath="Route.PriceRoi"
                                         Binding="{Binding Route.PriceRoi, StringFormat='{}{0:N0}\%', ConverterCulture=en-US}"
                                         ToolTipService.ToolTip="ROI per SCU = (sell price − buy price) / buy price. UEX returns this in percent units.">
+                        <DataGridTextColumn.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="ROI" />
+                                <ToggleButton Style="{StaticResource SortFavoriteStar}"
+                                              IsChecked="{Binding DataContext.DefaultSortMember, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource StringEquals}, ConverterParameter=Route.PriceRoi, Mode=OneWay}"
+                                              Command="{Binding DataContext.ToggleDefaultSortCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="Route.PriceRoi" />
+                            </StackPanel>
+                        </DataGridTextColumn.Header>
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock">
                                 <Setter Property="HorizontalAlignment" Value="Right" />
@@ -378,8 +680,18 @@
                     </DataGridTextColumn>
 
                     <!-- DISTANCE -->
-                    <DataGridTextColumn Header="Distance" Width="80"
+                    <DataGridTextColumn Width="95"
+                                        SortMemberPath="Route.Distance"
                                         Binding="{Binding Route.Distance, StringFormat='{}{0:F1} Gm', ConverterCulture=en-US}">
+                        <DataGridTextColumn.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Distance" />
+                                <ToggleButton Style="{StaticResource SortFavoriteStar}"
+                                              IsChecked="{Binding DataContext.DefaultSortMember, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource StringEquals}, ConverterParameter=Route.Distance, Mode=OneWay}"
+                                              Command="{Binding DataContext.ToggleDefaultSortCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="Route.Distance" />
+                            </StackPanel>
+                        </DataGridTextColumn.Header>
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock">
                                 <Setter Property="HorizontalAlignment" Value="Right" />
@@ -389,8 +701,32 @@
                         </DataGridTextColumn.ElementStyle>
                     </DataGridTextColumn>
 
+                    <!-- ETA — derived from Distance + a fixed quantum-drive baseline.
+                         Mirrors the ETA column shown on the UEX trade-routes web page. -->
+                    <DataGridTextColumn Width="80"
+                                        SortMemberPath="EstimatedTravelTime"
+                                        Binding="{Binding EstimatedTravelTime, Converter={StaticResource Eta}}">
+                        <DataGridTextColumn.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="ETA" />
+                                <ToggleButton Style="{StaticResource SortFavoriteStar}"
+                                              IsChecked="{Binding DataContext.DefaultSortMember, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource StringEquals}, ConverterParameter=EstimatedTravelTime, Mode=OneWay}"
+                                              Command="{Binding DataContext.ToggleDefaultSortCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="EstimatedTravelTime" />
+                            </StackPanel>
+                        </DataGridTextColumn.Header>
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="HorizontalAlignment" Value="Right" />
+                                <Setter Property="Margin" Value="0,0,12,0" />
+                                <Setter Property="Opacity" Value="0.85" />
+                                <Setter Property="ToolTip" Value="Estimated quantum travel time. Computed from distance using a 175 Mm/s drive baseline + 10 s spool/calibration. Per-vehicle quantum speeds aren't exposed by UEX, so this is a generic mid-range hauler approximation — comparisons between routes are still meaningful." />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
                     <!-- CONTAINER SIZES -->
-                    <DataGridTextColumn Header="Containers" Width="100"
+                    <DataGridTextColumn Header="Containers" Width="120"
                                         Binding="{Binding Route.ContainerSizesOrigin}">
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock">
@@ -404,8 +740,18 @@
                     </DataGridTextColumn>
 
                     <!-- UEX SCORE -->
-                    <DataGridTextColumn Header="Score" Width="60"
+                    <DataGridTextColumn Width="95"
+                                        SortMemberPath="Route.Score"
                                         Binding="{Binding Route.Score}">
+                        <DataGridTextColumn.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Score" />
+                                <ToggleButton Style="{StaticResource SortFavoriteStar}"
+                                              IsChecked="{Binding DataContext.DefaultSortMember, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource StringEquals}, ConverterParameter=Route.Score, Mode=OneWay}"
+                                              Command="{Binding DataContext.ToggleDefaultSortCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="Route.Score" />
+                            </StackPanel>
+                        </DataGridTextColumn.Header>
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock">
                                 <Setter Property="HorizontalAlignment" Value="Right" />
@@ -422,7 +768,16 @@
                          displayed value matches what UEX shows on its terminal page for
                          the exact row you're trading. Tooltip adds the terminal-wide
                          context (any commodity) for refresh-route planning. -->
-                    <DataGridTemplateColumn Header="Stale" Width="80" SortMemberPath="MaxDaysStaleThisRoute">
+                    <DataGridTemplateColumn Width="100" SortMemberPath="MaxDaysStaleThisRoute">
+                        <DataGridTemplateColumn.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Stale" />
+                                <ToggleButton Style="{StaticResource SortFavoriteStar}"
+                                              IsChecked="{Binding DataContext.DefaultSortMember, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource StringEquals}, ConverterParameter=MaxDaysStaleThisRoute, Mode=OneWay}"
+                                              Command="{Binding DataContext.ToggleDefaultSortCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                              CommandParameter="MaxDaysStaleThisRoute" />
+                            </StackPanel>
+                        </DataGridTemplateColumn.Header>
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <Border Margin="6,2" Padding="6,2"

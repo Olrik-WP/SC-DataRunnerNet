@@ -14,7 +14,8 @@
                  MinHeight="600" MinWidth="1100"
                  ExtendsContentIntoTitleBar="True"
                  WindowBackdropType="Mica"
-                 WindowStartupLocation="CenterScreen">
+                 WindowStartupLocation="CenterScreen"
+                 Icon="pack://application:,,,/Resources/SCDatarunnerNet.ico">
 
     <Grid>
         <Grid.RowDefinitions>

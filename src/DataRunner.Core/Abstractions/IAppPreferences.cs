@@ -129,6 +129,85 @@ public interface IAppPreferences
     /// </summary>
     double RoutesDatarunnerSliderValue { get; set; }
 
+    // -----------------------------------------------------------------------
+    // TRADE ROUTES — toggle filters, mirror of the UEX website pill bar.
+    //
+    // All flags default to false (no constraint = show everything UEX returned).
+    // When a flag is true, the corresponding constraint is ANDed into the
+    // client-side filter predicate. Multiple flags combine: e.g. "Legal" +
+    // "Ground" = only legal commodities AND ground-to-ground routes.
+    //
+    // Semantics for "endpoint" flags (Loading / AutoLoad / Monitored / Space /
+    // Ground / Refuel) — both endpoints must satisfy the criterion. This matches
+    // typical hauler intent ("I want a route I can refuel at on both ends",
+    // "I want ground-to-ground only") and keeps results predictable.
+    //
+    // "Legal" applies to the route's commodity (looked up via ICatalogProvider).
+    // "Predicted" surfaces routes where at least one side has zero user-confirmed
+    // price reports (= predicted price), useful for datarunners targeting
+    // refresh runs.
+    //
+    // Persisted so a user who always trades legal/ground-only doesn't have to
+    // re-toggle the filters on every app launch.
+    // -----------------------------------------------------------------------
+
+    /// <summary>Routes filter — keep only routes whose ORIGIN AND DESTINATION both have a loading dock.</summary>
+    bool RoutesFilterLoadingDock { get; set; }
+
+    /// <summary>Routes filter — keep only routes where both endpoints expose a freight elevator (auto-load).</summary>
+    bool RoutesFilterFreightElevator { get; set; }
+
+    /// <summary>Routes filter — keep only routes whose commodity is NOT flagged illegal.</summary>
+    bool RoutesFilterLegal { get; set; }
+
+    /// <summary>Routes filter — keep only routes where both endpoints are monitored terminals.</summary>
+    bool RoutesFilterMonitored { get; set; }
+
+    /// <summary>Routes filter — keep only routes between two space stations.</summary>
+    bool RoutesFilterSpace { get; set; }
+
+    /// <summary>Routes filter — keep only routes between two ground-based terminals.</summary>
+    bool RoutesFilterGround { get; set; }
+
+    /// <summary>Routes filter — keep only routes where both endpoints offer refuelling.</summary>
+    bool RoutesFilterRefuel { get; set; }
+
+    /// <summary>Routes filter — keep only routes where at least one side has a predicted (no user-confirmed) price.</summary>
+    bool RoutesFilterPredicted { get; set; }
+
+    /// <summary>
+    /// Routes filter — minimum effective profit (aUEC) the route must yield
+    /// for the user's current budget. Null = no minimum. Lets the user prune
+    /// micro-runs (the budget cap inevitably surfaces routes worth a few
+    /// thousand aUEC, which is rarely worth a quantum jump).
+    /// </summary>
+    long? RoutesMinProfit { get; set; }
+
+    /// <summary>
+    /// Routes filter — minimum profit per minute of quantum travel
+    /// (aUEC/min). Null = no minimum. Surfaces routes that are actually
+    /// efficient under realistic ship logistics; a 200K profit run that
+    /// takes 10 minutes is worse than a 80K run that takes 2.
+    /// </summary>
+    long? RoutesMinProfitPerMinute { get; set; }
+
+    /// <summary>
+    /// Bindable name of the column that should be used as the default sort
+    /// when the Trade Routes view is loaded. <c>null</c> = use the built-in
+    /// "DatarunnerScore" descending fallback. Persisted across sessions so
+    /// the user's preferred ranking sticks (e.g. "always sort by Profit
+    /// descending").
+    /// </summary>
+    string? RoutesDefaultSortMember { get; set; }
+
+    /// <summary>
+    /// Sort direction applied to <see cref="RoutesDefaultSortMember"/>.
+    /// Stored as the integer enum value of <c>System.ComponentModel.ListSortDirection</c>
+    /// to avoid leaking a WPF/PresentationFramework dependency into the
+    /// abstraction layer (Ascending=0, Descending=1).
+    /// </summary>
+    int RoutesDefaultSortDirection { get; set; }
+
     /// <summary>
     /// Delay (in milliseconds) inserted between two consecutive POSTs of the
     /// same batch send. Helps respect UEX's documented rate limits without

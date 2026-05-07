@@ -13,6 +13,13 @@ public sealed class UexCommodity
     [JsonPropertyName("is_buyable")] public int IsBuyable { get; set; }
     [JsonPropertyName("is_sellable")] public int IsSellable { get; set; }
     [JsonPropertyName("is_available_live")] public int IsAvailableLive { get; set; }
+
+    /// <summary>
+    /// 1 = contraband / illegal commodity (e.g. Altruciatoxin, WiDoW). Powers
+    /// the "Legal" filter on the Trade Routes view: when on, every route
+    /// trading an illegal commodity is hidden.
+    /// </summary>
+    [JsonPropertyName("is_illegal")] public int IsIllegal { get; set; }
 }
 
 /// <summary>Standard UEX response envelope: { "status": "ok", "data": [...] }.</summary>

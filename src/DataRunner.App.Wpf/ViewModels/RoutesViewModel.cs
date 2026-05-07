@@ -86,6 +86,60 @@ public sealed partial class RoutesViewModel : ObservableObject
     /// Default 30 — overridden by the persisted user preference at construction.</summary>
     [ObservableProperty] private double _datarunnerSliderValue = 30.0;
 
+    // ---- Pill toggles (mirror of the UEX trade-routes filter bar) -------
+    // All default to false (no constraint). Hydrated from prefs at startup
+    // and persisted on every flip via <see cref="OnRoutesFilterChanged"/>.
+    // They never trigger an API call — purely client-side <see cref="FilterPredicate"/>
+    // tweaks on the cached proposals.
+
+    /// <summary>Filter — keep only routes whose origin AND destination both have a loading dock.</summary>
+    [ObservableProperty] private bool _filterLoadingDock;
+
+    /// <summary>Filter — keep only routes where both endpoints expose a freight elevator (auto-load).</summary>
+    [ObservableProperty] private bool _filterFreightElevator;
+
+    /// <summary>Filter — hide routes trading illegal commodities (commodity catalog lookup).</summary>
+    [ObservableProperty] private bool _filterLegal;
+
+    /// <summary>Filter — keep only routes whose endpoints are both monitored terminals.</summary>
+    [ObservableProperty] private bool _filterMonitored;
+
+    /// <summary>Filter — keep only space-station ↔ space-station routes.</summary>
+    [ObservableProperty] private bool _filterSpace;
+
+    /// <summary>Filter — keep only ground ↔ ground routes.</summary>
+    [ObservableProperty] private bool _filterGround;
+
+    /// <summary>Filter — keep only routes where both endpoints offer refuelling.</summary>
+    [ObservableProperty] private bool _filterRefuel;
+
+    /// <summary>Filter — keep only routes where at least one side has a predicted (no user-confirmed) price.</summary>
+    [ObservableProperty] private bool _filterPredicted;
+
+    /// <summary>Filter — minimum effective profit (aUEC). Null = no minimum.</summary>
+    [ObservableProperty] private long? _minProfit;
+
+    /// <summary>Filter — minimum aUEC per minute of quantum travel. Null = no minimum.</summary>
+    [ObservableProperty] private long? _minProfitPerMinute;
+
+    /// <summary>
+    /// Bindable name of the column whose ★ button is currently lit (= the
+    /// favourited "default sort" target). Null = the built-in DatarunnerScore
+    /// descending fallback. Comparing this against each column's
+    /// <c>SortMemberPath</c> lets the header template light up the right
+    /// star without wiring a multi-converter per column.
+    /// </summary>
+    [ObservableProperty] private string? _defaultSortMember;
+
+    /// <summary>
+    /// Direction for <see cref="DefaultSortMember"/>. Defaults to descending
+    /// because every numeric/scoring column on this view (Profit, ROI, SCU,
+    /// ETA, Score, Stale) is more useful sorted big-to-small. The user can
+    /// click the column header to flip it; we capture the new direction in
+    /// <see cref="OnDataGridSorting"/>.
+    /// </summary>
+    [ObservableProperty] private ListSortDirection _defaultSortDirection = ListSortDirection.Descending;
+
     /// <summary>While true, persistence-side handlers MUST NOT save. Used while
     /// hydrating from prefs to avoid writing back the value we just loaded.</summary>
     private bool _suppressPersist;
@@ -117,6 +171,9 @@ public sealed partial class RoutesViewModel : ObservableObject
 
         View = CollectionViewSource.GetDefaultView(AllProposals);
         View.Filter = FilterPredicate;
+        // Initial sort = the built-in DatarunnerScore fallback. If the user
+        // had favourited a different column in a previous session,
+        // <see cref="HydrateFromPreferences"/> will overwrite this below.
         View.SortDescriptions.Add(new SortDescription(nameof(TradeRouteProposal.DatarunnerScore), ListSortDirection.Descending));
 
         _provider.Refreshed += OnProviderRefreshedFromAnyThread;
@@ -160,11 +217,54 @@ public sealed partial class RoutesViewModel : ObservableObject
             // hand-edited or migrated from an older schema with a
             // different scale.
             DatarunnerSliderValue = Math.Clamp(_prefs.RoutesDatarunnerSliderValue, 0.0, 100.0);
+
+            // Pill filter toggles. Mirroring the prefs back into the VM
+            // here means the on-disk state IS the source of truth — flipping
+            // a pill saves immediately, and re-opening the page restores
+            // exactly what the user left enabled.
+            FilterLoadingDock = _prefs.RoutesFilterLoadingDock;
+            FilterFreightElevator = _prefs.RoutesFilterFreightElevator;
+            FilterLegal = _prefs.RoutesFilterLegal;
+            FilterMonitored = _prefs.RoutesFilterMonitored;
+            FilterSpace = _prefs.RoutesFilterSpace;
+            FilterGround = _prefs.RoutesFilterGround;
+            FilterRefuel = _prefs.RoutesFilterRefuel;
+            FilterPredicted = _prefs.RoutesFilterPredicted;
+            MinProfit = _prefs.RoutesMinProfit;
+            MinProfitPerMinute = _prefs.RoutesMinProfitPerMinute;
+
+            // Default sort. Persisted enum direction is stored as int in
+            // prefs (0 = ascending, 1 = descending) to keep the abstraction
+            // free of any WPF dependency. Anything outside [0,1] is treated
+            // as descending — the most useful ordering for every numeric
+            // column on this view.
+            DefaultSortMember = _prefs.RoutesDefaultSortMember;
+            DefaultSortDirection = _prefs.RoutesDefaultSortDirection == 0
+                ? ListSortDirection.Ascending
+                : ListSortDirection.Descending;
+            ApplyDefaultSort();
         }
         finally
         {
             _suppressPersist = false;
         }
+    }
+
+    /// <summary>
+    /// Replaces <see cref="View"/>'s sort descriptions with whatever the
+    /// user has favourited (or the DatarunnerScore fallback when nothing
+    /// is favourited). Called at startup after hydration, and on every
+    /// change to <see cref="DefaultSortMember"/> /
+    /// <see cref="DefaultSortDirection"/> via the partial property hooks.
+    /// </summary>
+    private void ApplyDefaultSort()
+    {
+        var sortMember = !string.IsNullOrWhiteSpace(DefaultSortMember)
+            ? DefaultSortMember!
+            : nameof(TradeRouteProposal.DatarunnerScore);
+
+        View.SortDescriptions.Clear();
+        View.SortDescriptions.Add(new SortDescription(sortMember, DefaultSortDirection));
     }
 
     /// <summary>
@@ -416,27 +516,42 @@ public sealed partial class RoutesViewModel : ObservableObject
     private void ReloadVehicles()
     {
         // Snapshot the selected vehicle id BEFORE the clear so we can
-        // re-attach to the equivalent instance in the new collection. The
-        // alternative — letting WPF reset SelectedVehicle to null because
-        // the old reference is no longer in the ItemsSource — would
-        // trigger OnSelectedVehicleChanged and clobber the persisted prefs
-        // with null on every catalog refresh.
+        // re-attach to the equivalent instance in the new collection.
         var previousId = SelectedVehicle?.Id ?? _prefs.RoutesSelectedVehicleId;
 
-        Vehicles.Clear();
-        foreach (var v in _vehicles.CargoVehicles) Vehicles.Add(v);
-
-        if (previousId is { } id)
+        // CRITICAL: the persist guard MUST cover the WHOLE swap, not just the
+        // re-selection step.
+        //
+        // Background: the Vehicles ObservableCollection is bound to the WPF
+        // ComboBox via ItemsSource, with SelectedItem={Binding SelectedVehicle,
+        // Mode=TwoWay}. When we call Vehicles.Clear() the ComboBox's previously
+        // selected reference disappears from the collection — WPF reacts by
+        // pushing SelectedItem = null back through the binding. That assignment
+        // hits OnSelectedVehicleChanged(null), which calls PersistRoutesPreferences,
+        // which writes RoutesSelectedVehicleId = null to prefs.json. The
+        // subsequent re-selection IS suppressed, so the on-disk state never
+        // gets repaired and the user's vehicle is silently lost on the next
+        // app launch.
+        //
+        // This bug only triggers when the vehicles cache has expired (TTL 24h)
+        // — that's exactly when ReloadVehicles is invoked from the Refreshed
+        // event after the user navigated to the page (vs the constructor call
+        // where no binding is active yet). Wrapping the whole method in the
+        // guard kills both paths in one shot.
+        _suppressPersist = true;
+        try
         {
-            _suppressPersist = true;
-            try
+            Vehicles.Clear();
+            foreach (var v in _vehicles.CargoVehicles) Vehicles.Add(v);
+
+            if (previousId is { } id)
             {
                 SelectedVehicle = Vehicles.FirstOrDefault(v => v.Id == id);
             }
-            finally
-            {
-                _suppressPersist = false;
-            }
+        }
+        finally
+        {
+            _suppressPersist = false;
         }
     }
 
@@ -470,6 +585,57 @@ public sealed partial class RoutesViewModel : ObservableObject
                 if (routeSizes.Count > 0 && !routeSizes.Overlaps(allowed)) return false;
             }
         }
+
+        // Pill toggle filters — mirror the UEX trade-routes page behaviour.
+        // Each ON toggle ANDs a constraint into the predicate; an OFF toggle
+        // is a no-op. "Endpoint" flags require BOTH origin AND destination to
+        // match — this matches typical hauler intent ("ground-to-ground only",
+        // "auto-load both ends") and keeps the filtered set predictable when
+        // multiple toggles are combined.
+        var r = p.Route;
+        if (FilterLoadingDock && (r.HasLoadingDockOrigin != 1 || r.HasLoadingDockDestination != 1)) return false;
+        if (FilterFreightElevator && (r.HasFreightElevatorOrigin != 1 || r.HasFreightElevatorDestination != 1)) return false;
+        if (FilterMonitored && (r.IsMonitoredOrigin != 1 || r.IsMonitoredDestination != 1)) return false;
+        if (FilterSpace && (r.IsSpaceStationOrigin != 1 || r.IsSpaceStationDestination != 1)) return false;
+        if (FilterGround && (r.IsOnGroundOrigin != 1 || r.IsOnGroundDestination != 1)) return false;
+        if (FilterRefuel && (r.HasRefuelOrigin != 1 || r.HasRefuelDestination != 1)) return false;
+
+        // "Legal" needs a catalog lookup — UEX flags illegality on the
+        // commodity, not on each route. A null lookup means the catalog
+        // hasn't loaded yet (or the commodity was decommissioned); we
+        // conservatively show the row so we don't hide legitimate routes
+        // because of a transient catalog miss.
+        if (FilterLegal)
+        {
+            var commodity = _catalog.GetCommodity(r.IdCommodity);
+            if (commodity is { IsIllegal: 1 }) return false;
+        }
+
+        // "Predicted" = at least one side has a predicted price (no user
+        // reports backing it). Useful for datarunners targeting routes
+        // where their submission would actually move the needle. Older
+        // cached routes may have 0 on both sides because the schema
+        // predates user-rows tracking; we don't try to disambiguate, the
+        // user can clear the toggle if it produces too many false positives.
+        if (FilterPredicted && r.PriceOriginUsersRows > 0 && r.PriceDestinationUsersRows > 0) return false;
+
+        // HARD RULE — never surface negative-profit routes. The budget cap
+        // can produce them when the user's investment can only afford a
+        // micro-load that doesn't even cover the per-SCU price spread (or
+        // when UEX still ranks a route where the destination price has
+        // crashed since the algo last ran). Regardless of cause, a negative
+        // run is never actionable, so we drop it unconditionally — no
+        // toggle, no surprise. The DataGrid column for Profit is the most
+        // glanced-at signal on this screen and a wall of red numbers
+        // actively misleads the user.
+        if (p.EffectiveProfit <= 0) return false;
+
+        // Numeric thresholds — pure trader-side filters that UEX doesn't
+        // expose. Both default to null = no constraint; the user types a
+        // value in the filter bar and it sticks across sessions.
+        if (MinProfit is { } mp && mp > 0 && p.EffectiveProfit < mp) return false;
+        if (MinProfitPerMinute is { } mpm && mpm > 0 && p.ProfitPerMinute < mpm) return false;
+
         return true;
     }
 
@@ -674,6 +840,80 @@ public sealed partial class RoutesViewModel : ObservableObject
         PersistRoutesPreferences();
     }
 
+    // -----------------------------------------------------------------------
+    // Pill toggle handlers — purely client-side (no API call). Each one just
+    // re-runs the filter predicate over the cached proposals and persists
+    // the new state. Routed through a single helper instead of duplicating
+    // body 8x: same code path means consistent behaviour and one place to
+    // tweak if we ever want to e.g. debounce the save.
+    // -----------------------------------------------------------------------
+    partial void OnFilterLoadingDockChanged(bool value) => OnRoutesFilterChanged();
+    partial void OnFilterFreightElevatorChanged(bool value) => OnRoutesFilterChanged();
+    partial void OnFilterLegalChanged(bool value) => OnRoutesFilterChanged();
+    partial void OnFilterMonitoredChanged(bool value) => OnRoutesFilterChanged();
+    partial void OnFilterSpaceChanged(bool value) => OnRoutesFilterChanged();
+    partial void OnFilterGroundChanged(bool value) => OnRoutesFilterChanged();
+    partial void OnFilterRefuelChanged(bool value) => OnRoutesFilterChanged();
+    partial void OnFilterPredictedChanged(bool value) => OnRoutesFilterChanged();
+    partial void OnMinProfitChanged(long? value) => OnRoutesFilterChanged();
+    partial void OnMinProfitPerMinuteChanged(long? value) => OnRoutesFilterChanged();
+
+    private void OnRoutesFilterChanged()
+    {
+        View.Refresh();
+        UpdateFilteredCount();
+        PersistRoutesPreferences();
+    }
+
+    /// <summary>
+    /// Toggles the "default sort" star on the column whose <c>SortMemberPath</c>
+    /// matches <paramref name="sortMember"/>. Clicking the lit star unsets
+    /// the favourite (returns to the DatarunnerScore fallback); clicking an
+    /// unlit star promotes that column to default. Direction stays at the
+    /// last value the user actually sorted by — we don't reset it on every
+    /// star toggle so a user who likes "Profit ascending" keeps that even
+    /// after un-favouriting and re-favouriting the column.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleDefaultSort(string? sortMember)
+    {
+        if (string.IsNullOrWhiteSpace(sortMember)) return;
+        DefaultSortMember = string.Equals(DefaultSortMember, sortMember, StringComparison.Ordinal)
+            ? null
+            : sortMember;
+    }
+
+    partial void OnDefaultSortMemberChanged(string? value)
+    {
+        ApplyDefaultSort();
+        PersistRoutesPreferences();
+    }
+
+    partial void OnDefaultSortDirectionChanged(ListSortDirection value)
+    {
+        ApplyDefaultSort();
+        PersistRoutesPreferences();
+    }
+
+    /// <summary>
+    /// Wired from <c>RoutesView.xaml.cs</c> to the DataGrid's
+    /// <c>Sorting</c> event so a manual click on a column header captures
+    /// the new direction into <see cref="DefaultSortDirection"/> AND
+    /// — only when the column is already favourited — keeps the favourite
+    /// in sync. We deliberately do NOT auto-favourite columns the user
+    /// merely clicks: that would silently override a previously-favourited
+    /// column on a single misclick. The user explicitly opts in via the
+    /// star icon.
+    /// </summary>
+    public void NotifyColumnSorted(string? sortMember, ListSortDirection direction)
+    {
+        if (string.IsNullOrWhiteSpace(sortMember)) return;
+        if (string.Equals(DefaultSortMember, sortMember, StringComparison.Ordinal))
+        {
+            DefaultSortDirection = direction;
+        }
+    }
+
     partial void OnDatarunnerSliderValueChanged(double value)
     {
         // Slider only affects sort weight (no API call).
@@ -697,6 +937,18 @@ public sealed partial class RoutesViewModel : ObservableObject
         if (_suppressPersist) return;
         _prefs.RoutesSelectedVehicleId = SelectedVehicle?.Id;
         _prefs.RoutesDatarunnerSliderValue = DatarunnerSliderValue;
+        _prefs.RoutesFilterLoadingDock = FilterLoadingDock;
+        _prefs.RoutesFilterFreightElevator = FilterFreightElevator;
+        _prefs.RoutesFilterLegal = FilterLegal;
+        _prefs.RoutesFilterMonitored = FilterMonitored;
+        _prefs.RoutesFilterSpace = FilterSpace;
+        _prefs.RoutesFilterGround = FilterGround;
+        _prefs.RoutesFilterRefuel = FilterRefuel;
+        _prefs.RoutesFilterPredicted = FilterPredicted;
+        _prefs.RoutesMinProfit = MinProfit;
+        _prefs.RoutesMinProfitPerMinute = MinProfitPerMinute;
+        _prefs.RoutesDefaultSortMember = DefaultSortMember;
+        _prefs.RoutesDefaultSortDirection = DefaultSortDirection == ListSortDirection.Ascending ? 0 : 1;
         _ = SaveRoutesPreferencesAsync();
     }
 

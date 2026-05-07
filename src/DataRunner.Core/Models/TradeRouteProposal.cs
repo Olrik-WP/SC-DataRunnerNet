@@ -100,4 +100,62 @@ public sealed class TradeRouteProposal
 
     /// <summary>UEC profit at the budget-capped quantity (= <see cref="EffectiveScu"/> × <c>price_margin</c>).</summary>
     public double EffectiveProfit { get; set; }
+
+    // ---------------------------------------------------------------------
+    // ETA — derived, not from UEX.
+    //
+    // UEX shows an ETA column on its trade-routes page; we mirror it here by
+    // computing travel time from <see cref="UexCommodityRoute.Distance"/>
+    // (Gm) using a fixed civilian quantum-drive baseline (175 Mm/s ≈ the
+    // average of the meta haulers like C2 / Caterpillar / Hull C). We keep
+    // a small spool/calibration overhead so very-short routes don't display
+    // a meaninglessly tiny "1s" — the cargo-loading delay alone dwarfs that.
+    //
+    // Per-vehicle quantum speeds aren't exposed by /vehicles (the field is
+    // present in the schema but always 0 in the live data), so a constant
+    // is the most honest approximation we can make. Trade-route comparisons
+    // are still meaningful because the constant cancels out — every route
+    // is rated against the same ship.
+    // ---------------------------------------------------------------------
+
+    /// <summary>Quantum-drive baseline used by <see cref="EstimatedTravelTime"/>. Mégamètres per second.</summary>
+    public const double QuantumSpeedMmPerSec = 175.0;
+
+    /// <summary>Spool + calibration overhead added on top of pure travel time.</summary>
+    public static readonly TimeSpan QuantumOverhead = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Estimated quantum travel time between origin and destination. Derived
+    /// from <see cref="UexCommodityRoute.Distance"/> using <see cref="QuantumSpeedMmPerSec"/>.
+    /// Returns <see cref="TimeSpan.Zero"/> when the route distance is unknown
+    /// or non-positive (intra-station hops with distance=0).
+    /// </summary>
+    public TimeSpan EstimatedTravelTime
+    {
+        get
+        {
+            if (Route.Distance <= 0) return TimeSpan.Zero;
+            // 1 Gm == 1000 Mm, so seconds = (Gm * 1000) / (Mm/s).
+            var seconds = (Route.Distance * 1000.0) / QuantumSpeedMmPerSec;
+            return TimeSpan.FromSeconds(seconds) + QuantumOverhead;
+        }
+    }
+
+    /// <summary>
+    /// Effective profit per minute of travel (aUEC/min). Falls back to
+    /// <see cref="EffectiveProfit"/> when the route has no measurable
+    /// distance — those routes happen instantly so per-minute math is
+    /// undefined, and treating them as "infinite efficiency" would distort
+    /// the filter / sort. Returning the raw profit is a sane proxy: an
+    /// instant trade still surfaces near the top of any "min profit/min"
+    /// filter the user sets to a reasonable threshold.
+    /// </summary>
+    public double ProfitPerMinute
+    {
+        get
+        {
+            var minutes = EstimatedTravelTime.TotalMinutes;
+            return minutes > 0 ? EffectiveProfit / minutes : EffectiveProfit;
+        }
+    }
 }

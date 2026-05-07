@@ -24,7 +24,7 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>DataRunner.App</RootNamespace>
     <AssemblyName>DataRunner.App</AssemblyName>
-    <ApplicationIcon Condition="Exists('Resources\app.ico')">Resources\app.ico</ApplicationIcon>
+    <ApplicationIcon>Resources\SCDatarunnerNet.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!--
@@ -42,5 +42,10 @@
   <PropertyGroup>
     <StartupObject>DataRunner.App.App</StartupObject>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\SCDatarunnerNet.png" />
+    <Resource Include="Resources\SCDatarunnerNet.ico" />
+  </ItemGroup>
 
 </Project>
