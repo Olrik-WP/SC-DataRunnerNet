@@ -16,9 +16,11 @@
             <ColumnDefinition>
                 <ColumnDefinition.Style>
                     <Style TargetType="ColumnDefinition">
-                        <Setter Property="Width" Value="320" />
-                        <Setter Property="MinWidth" Value="240" />
-                        <Setter Property="MaxWidth" Value="500" />
+                        <!-- Slightly wider default so the toolbar row (Import / rescan /
+                             delete / open-folder) does not clip on typical layouts. -->
+                        <Setter Property="Width" Value="380" />
+                        <Setter Property="MinWidth" Value="300" />
+                        <Setter Property="MaxWidth" Value="560" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsCollapsed}" Value="True">
                                 <Setter Property="Width" Value="52" />

@@ -192,6 +192,39 @@ public sealed class InboxStatusToDotBrushConverter : IValueConverter
 }
 
 /// <summary>
+/// Pretty-prints the <see cref="DataRunner.Core.Models.InventoryStatus"/>
+/// enum for the editor's commodity-rows status column. Without this, WPF
+/// falls back to the enum's <c>ToString()</c> which yields PascalCase
+/// values like <c>"OutOfStock"</c> or <c>"VeryHigh"</c> that visibly
+/// overflow the dropdown chrome ("OutOfStoc"). The converter swaps in
+/// human-friendly two-word labels and returns <c>"—"</c> for the
+/// <c>Unknown</c> sentinel so the placeholder cell looks intentional
+/// instead of empty.
+/// </summary>
+public sealed class InventoryStatusToLabelConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var name = value?.ToString() ?? "";
+        return name switch
+        {
+            "OutOfStock" => "Out of stock",
+            "VeryLow"    => "Very low",
+            "Low"        => "Low",
+            "Medium"     => "Medium",
+            "High"       => "High",
+            "VeryHigh"   => "Very high",
+            "Maximum"    => "Maximum",
+            "Unknown"    => "—",
+            _            => name,
+        };
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
 /// Maps any non-null value to <see cref="Visibility.Visible"/>, null to
 /// <see cref="Visibility.Collapsed"/>. Useful for "show this card only when
 /// the bound object is non-null" without writing a custom converter per type.

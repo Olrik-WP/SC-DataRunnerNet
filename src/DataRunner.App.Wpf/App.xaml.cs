@@ -99,9 +99,12 @@ public partial class App : Application
                 services.AddHostedService(sp => sp.GetRequiredService<ScreenshotFolderWatcher>());
 
                 // Smart-split + sequential POST loop for the inbox toolbar's
-                // Send batch flow. Both are stateless apart from their DI
-                // dependencies (catalog + UEX client + history + prefs) so
+                // Send batch flow. The payload factory is shared between the
+                // submitter (real POST) and the preview view model (so the
+                // dialog shows the EXACT JSON the submitter will send). All
+                // three are stateless apart from their DI dependencies so
                 // singleton lifetimes are fine.
+                services.AddSingleton<IBatchPayloadFactory, BatchPayloadFactory>();
                 services.AddSingleton<IBatchPlanner, BatchPlanner>();
                 services.AddSingleton<IBatchSubmitter, BatchSubmitter>();
 
@@ -162,11 +165,12 @@ public partial class App : Application
         // constructor would create a heavy startup chain).
         var batchPlanner = Host.Services.GetRequiredService<IBatchPlanner>();
         var batchSubmitter = Host.Services.GetRequiredService<IBatchSubmitter>();
+        var batchPayloadFactory = Host.Services.GetRequiredService<IBatchPayloadFactory>();
         var dialogService = Host.Services.GetRequiredService<IDialogService>();
         var gameVersions = Host.Services.GetRequiredService<IGameVersionsService>();
         inbox.OnSendBatchRequested = async (validatedItems, ct) =>
             await RunBatchSendAsync(validatedItems, ct, batchPlanner, batchSubmitter,
-                                    dialogService, prefs, gameVersions).ConfigureAwait(true);
+                                    batchPayloadFactory, dialogService, prefs, gameVersions).ConfigureAwait(true);
 
         await EnsureCatalogReadyAsync();
 
@@ -267,6 +271,7 @@ public partial class App : Application
         CancellationToken ct,
         IBatchPlanner planner,
         IBatchSubmitter submitter,
+        IBatchPayloadFactory payloadFactory,
         IDialogService dialogService,
         IAppPreferences prefs,
         IGameVersionsService gameVersions)
@@ -281,16 +286,10 @@ public partial class App : Application
             return;
         }
 
-        // Mandatory preview — cancellation here means the user changed their
-        // mind, so we just bail without touching any item's status.
-        var previewVm = new ViewModels.BatchPreviewViewModel(plan);
-        var confirmed = await dialogService.ShowBatchPreviewAsync(previewVm).ConfigureAwait(true);
-        if (!confirmed) return;
-
-        // Snapshot the game-version values once at batch start so a single
-        // batch is internally consistent even if /game_versions refreshes
-        // mid-run. Resolve fails for missing PTU build → null (BatchSubmitter
-        // forwards as null → UEX uses its current LIVE/PTU as fallback).
+        // Snapshot the game-version values BEFORE the dialog so the JSON
+        // preview reflects the same `game_version` the submitter will use.
+        // /game_versions can refresh mid-run; freezing it here keeps the
+        // preview <-> network bodies byte-identical.
         string? liveVersion = null;
         string? ptuVersion = null;
         try { liveVersion = await gameVersions.ResolveAsync(Core.Models.GameBranch.Live, ct).ConfigureAwait(true); }
@@ -302,6 +301,12 @@ public partial class App : Application
             DefaultIsProduction: prefs.DefaultIsProduction,
             LiveGameVersion: liveVersion,
             PtuGameVersion: ptuVersion);
+
+        // Mandatory preview — cancellation here means the user changed their
+        // mind, so we just bail without touching any item's status.
+        var previewVm = new ViewModels.BatchPreviewViewModel(plan, options, payloadFactory, prefs);
+        var confirmed = await dialogService.ShowBatchPreviewAsync(previewVm).ConfigureAwait(true);
+        if (!confirmed) return;
 
         try
         {
