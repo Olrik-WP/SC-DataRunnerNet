@@ -176,14 +176,14 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
                 if (tabDiagnostic.Tab == TerminalTab.Unknown)
                 {
                     _logger.LogInformation(
-                        "Active-tab detection: Unknown — buySat={BuySat} sellSat={SellSat} scale={Scale:F2} reason={Reason}",
-                        buySatLog, sellSatLog, scaleFactor, tabDiagnostic.UnknownReason ?? "(none)");
+                        "Active-tab detection: Unknown — buySat={BuySat} sellSat={SellSat} palette={Palette} scale={Scale:F2} reason={Reason}",
+                        buySatLog, sellSatLog, tabDiagnostic.Palette, scaleFactor, tabDiagnostic.UnknownReason ?? "(none)");
                 }
                 else
                 {
                     _logger.LogInformation(
-                        "Active-tab detection: {Tab} — buySat={BuySat} sellSat={SellSat} scale={Scale:F2}",
-                        detectedActiveTab, buySatLog, sellSatLog, scaleFactor);
+                        "Active-tab detection: {Tab} — buySat={BuySat} sellSat={SellSat} palette={Palette} scale={Scale:F2}",
+                        detectedActiveTab, buySatLog, sellSatLog, tabDiagnostic.Palette, scaleFactor);
                 }
             }
         }

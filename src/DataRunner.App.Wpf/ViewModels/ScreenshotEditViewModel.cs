@@ -37,6 +37,9 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
 
     private InboxItem? _bound;
     private bool _suspendSearchSync;
+    /// <summary>Path of the image UEX attaches (always <see cref="InboxItem.ImagePath"/> —
+    /// first source for merged items). Side-by-side preview may show another source.</summary>
+    private string _primarySubmissionImagePath = "";
 
     [ObservableProperty] private BitmapImage? _previewImage;
     [ObservableProperty] private string _sourceImagePath = "";
@@ -64,11 +67,39 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
     /// </summary>
     [ObservableProperty] private bool _sideBySideScreenshot;
 
+    /// <summary>Indexed labels (#1, #2, …) for switching the docked preview when
+    /// <see cref="InboxItem.SourcePaths"/> has more than one file.</summary>
+    public ObservableCollection<PreviewSourceChip> PreviewSourceChips { get; } = new();
+
+    /// <summary>Which <see cref="InboxItem.SourcePaths"/> entry is shown in the
+    /// side-by-side panel. Always 0 for single-source items.</summary>
+    [ObservableProperty] private int _activePreviewSourceIndex;
+
+    /// <summary>True when the bound inbox item has 2+ screenshots to inspect.</summary>
+    public bool HasMultiplePreviewSources => PreviewSourceChips.Count > 1;
+
+    /// <summary>Short header for <see cref="Views.ScreenshotPanel"/> (file name only).</summary>
+    public string PreviewImageHeader =>
+        string.IsNullOrWhiteSpace(SourceImagePath)
+            ? "Screenshot"
+            : $"Screenshot: {Path.GetFileName(SourceImagePath)}";
+
     partial void OnSideBySideScreenshotChanged(bool value)
     {
         if (_prefs is null) return;
         _prefs.SideBySideScreenshot = value;
         _ = _prefs.SaveAsync();
+    }
+
+    partial void OnActivePreviewSourceIndexChanged(int value)
+    {
+        if (value < 0 || PreviewSourceChips.Count == 0) return;
+        ApplyPreviewFromIndex(value);
+    }
+
+    partial void OnSourceImagePathChanged(string value)
+    {
+        OnPropertyChanged(nameof(PreviewImageHeader));
     }
 
     [RelayCommand]
@@ -611,6 +642,57 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         }
     }
 
+    private void RebuildPreviewSourceChips()
+    {
+        PreviewSourceChips.Clear();
+        if (_bound?.SourcePaths is { Count: > 0 } paths)
+        {
+            for (var i = 0; i < paths.Count; i++)
+                PreviewSourceChips.Add(new PreviewSourceChip(i));
+        }
+        else if (!string.IsNullOrWhiteSpace(_bound?.ImagePath))
+        {
+            PreviewSourceChips.Add(new PreviewSourceChip(0));
+        }
+
+        OnPropertyChanged(nameof(HasMultiplePreviewSources));
+    }
+
+    /// <summary>Loads <see cref="PreviewImage"/> / <see cref="SourceImagePath"/>
+    /// for the given index into <see cref="InboxItem.SourcePaths"/>.</summary>
+    private void ApplyPreviewFromIndex(int index)
+    {
+        if (_bound is null) return;
+
+        string? path = null;
+        if (_bound.SourcePaths is { Count: > 0 } paths)
+        {
+            index = Math.Clamp(index, 0, paths.Count - 1);
+            path = paths[index];
+        }
+        else
+            path = _bound.ImagePath;
+
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        SourceImagePath = path;
+        try
+        {
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.UriSource = new Uri(path);
+            bmp.EndInit();
+            bmp.Freeze();
+            PreviewImage = bmp;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load preview image: {Path}", path);
+            PreviewImage = null;
+        }
+    }
+
     public void Load(InboxItem item)
     {
         _bound = item;
@@ -625,21 +707,13 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
         // screenshot was picked up from). The draft (if any) cannot override
         // branch — it's a hard property of the source folder.
         Branch = item.Branch;
-        SourceImagePath = item.ImagePath;
-        try
-        {
-            var bmp = new BitmapImage();
-            bmp.BeginInit();
-            bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.UriSource = new Uri(item.ImagePath);
-            bmp.EndInit();
-            bmp.Freeze();
-            PreviewImage = bmp;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to load preview image: {Path}", item.ImagePath);
-        }
+        _primarySubmissionImagePath = item.ImagePath;
+
+        RebuildPreviewSourceChips();
+        if (ActivePreviewSourceIndex != 0)
+            ActivePreviewSourceIndex = 0;
+        else
+            ApplyPreviewFromIndex(0);
 
         // Hydrate the OCR-shaped fields (Tab, terminal, rows, container sizes)
         // from the parsed submission first. This is the canonical baseline.
@@ -1067,13 +1141,13 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
             var result = await _api.SubmitDataAsync(payload);
 
             // Resolve the FULL list of source files this submission represents.
-            // For a single-shot import that's [SourceImagePath]; for a merged
+            // For a single-shot import that's the primary path; for a merged
             // item it's all the merged file paths. We pass basenames to the
             // history (UEX only sees one anyway) so the watcher can match
             // against DirectoryInfo.EnumerateFiles().Name later.
             var allSourcePaths = (_bound?.SourcePaths is { Count: > 0 } sp)
                 ? sp
-                : new List<string> { SourceImagePath };
+                : new List<string> { _primarySubmissionImagePath };
             var allSourceNames = allSourcePaths
                 .Select(Path.GetFileName)
                 .Where(n => !string.IsNullOrWhiteSpace(n))
@@ -1089,7 +1163,7 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
                 HttpStatusCode = result.HttpStatusCode,
                 ApiStatus = result.Status,
                 ApiMessage = result.Message,
-                SourceImage = Path.GetFileName(SourceImagePath),
+                SourceImage = Path.GetFileName(_primarySubmissionImagePath),
                 SourceImages = allSourceNames,
                 RequestJson = result.SerialisedRequestBody,
                 ResponseJson = result.RawResponseBody,
@@ -1296,7 +1370,7 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
             Meta = new PayloadMeta
             {
                 Draft = true,
-                SourceImage = Path.GetFileName(SourceImagePath),
+                SourceImage = Path.GetFileName(_primarySubmissionImagePath),
                 TerminalDisplayName = SelectedTerminal?.DisplayName,
                 TerminalMatchScore = TerminalMatchScore,
                 TerminalMatchedField = TerminalSourceField,
@@ -1327,7 +1401,7 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
 
         if (_prefs.AttachScreenshotOnSubmit)
         {
-            payload.Screenshot = TryEncodeScreenshot(SourceImagePath);
+            payload.Screenshot = TryEncodeScreenshot(_primarySubmissionImagePath);
         }
 
         return payload;
@@ -1362,6 +1436,15 @@ public sealed partial class ScreenshotEditViewModel : ObservableObject
             return null;
         }
     }
+}
+
+/// <summary>One pill in the side-by-side screenshot source switcher (#1, #2, …).</summary>
+public sealed class PreviewSourceChip
+{
+    public int Index { get; }
+    public string Label => $"#{Index + 1}";
+
+    public PreviewSourceChip(int index) => Index = index;
 }
 
 public sealed partial class EditableRow : ObservableObject

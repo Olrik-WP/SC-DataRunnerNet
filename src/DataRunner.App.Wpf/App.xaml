@@ -21,6 +21,7 @@
             <conv:DaysStaleToBrushConverter x:Key="DaysStaleToBrush" />
             <conv:InboxStatusToBrushConverter x:Key="InboxStatusToBrush" />
             <conv:InboxStatusToDotBrushConverter x:Key="InboxStatusToDot" />
+            <conv:ReferenceEqualsToBoolConverter x:Key="RefEqual" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

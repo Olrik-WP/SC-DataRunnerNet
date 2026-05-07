@@ -86,6 +86,24 @@ public static class TabDetector
     /// which is often the cleanest source of saturated pixels.</summary>
     private const int VerticalPadding = 4;
 
+    /// <summary>Minimum HSV-V (brightness, 0..255) gap between the two
+    /// labels before we commit to a result on the VALUE axis. Pyro
+    /// stations render BOTH tabs in the same red hue (saturation
+    /// indistinguishable, ~252 on both labels) but the active tab is
+    /// noticeably BRIGHTER than the inactive one. Calibrated from the
+    /// 2026-05-07 Pyro Endgame logs where the V gap stays around
+    /// 30..60 units; 20 is the floor that admits the dimmer Pyro
+    /// captures while staying comfortably above pixel noise.</summary>
+    private const double ValueDecisionMargin = 20.0;
+
+    /// <summary>The brighter label's mean V must reach at least this
+    /// before the V-axis fallback fires. Stops the fallback from
+    /// committing to a result on a corrupted/dark image where both
+    /// labels are dim. Calibrated against Pyro Endgame where the
+    /// active label sits around V≈210 and the inactive around
+    /// V≈170.</summary>
+    private const double MinActiveValue = 140.0;
+
     /// <summary>
     /// Detects the active tab from the right-panel OCR regions. Returns
     /// <see cref="TerminalTab.Unknown"/> when one or both tab labels were
@@ -172,48 +190,89 @@ public static class TabDetector
         if (sellRegion is null)
             return new TabDetectionResult(TerminalTab.Unknown, null, null, "missing-sell-label");
 
-        var buySat = MeasureSaturation(originalImage, buyRegion.Value, rightPanelStartX, scaleFactor);
-        var sellSat = MeasureSaturation(originalImage, sellRegion.Value, rightPanelStartX, scaleFactor);
+        var buy = MeasureLabel(originalImage, buyRegion.Value, rightPanelStartX, scaleFactor);
+        var sell = MeasureLabel(originalImage, sellRegion.Value, rightPanelStartX, scaleFactor);
 
-        if (buySat < 0 || sellSat < 0)
+        if (buy is null || sell is null)
             return new TabDetectionResult(TerminalTab.Unknown,
-                buySat < 0 ? (double?)null : buySat,
-                sellSat < 0 ? (double?)null : sellSat,
-                "roi-too-small");
+                buy?.Saturation, sell?.Saturation, "roi-too-small", DetectedPalette.Unknown);
 
-        var diff = buySat - sellSat;
-        var maxSat = Math.Max(buySat, sellSat);
+        var palette = ClassifyPalette(buy.Value, sell.Value);
 
-        // Both labels are nearly grey — no meaningful highlight at
-        // all. Return Unknown so we don't commit to a false positive
-        // off pure pixel noise (eg. a corrupted or non-SC capture).
-        if (maxSat < MinActiveSaturation)
-            return new TabDetectionResult(TerminalTab.Unknown, buySat, sellSat,
-                $"both-grey ({buySat:F1} vs {sellSat:F1}, max<{MinActiveSaturation:F0})");
+        // ---- AXIS 1: SATURATION (Stanton, Crusader, most amber stations) -------
+        // Inactive label is rendered in a near-grey desaturated tint, active
+        // label in the theme accent colour. Wide saturation gap → easy
+        // decision. Tried first because it has the most calibration data
+        // and the lowest historical false-positive rate.
+        var satDiff = buy.Value.Saturation - sell.Value.Saturation;
+        var maxSat = Math.Max(buy.Value.Saturation, sell.Value.Saturation);
+        var satConclusive =
+            maxSat >= MinActiveSaturation
+            && Math.Abs(satDiff) >= DecisionMargin;
 
-        if (Math.Abs(diff) < DecisionMargin)
-            return new TabDetectionResult(TerminalTab.Unknown, buySat, sellSat,
-                $"low-margin ({buySat:F1} vs {sellSat:F1}, |diff|<{DecisionMargin:F0})");
+        if (satConclusive)
+        {
+            return new TabDetectionResult(
+                satDiff > 0 ? TerminalTab.Buy : TerminalTab.Sell,
+                buy.Value.Saturation,
+                sell.Value.Saturation,
+                UnknownReason: null,
+                palette);
+        }
+
+        // ---- AXIS 2: VALUE (Pyro red theme, where saturation is identical) ------
+        // Pyro renders BOTH tabs in the same saturated red — only the
+        // brightness (HSV-V) differs between active (bright) and inactive
+        // (dim). Trigger this fallback ONLY when saturation was
+        // inconclusive; never overrides a confident saturation decision,
+        // so Stanton captures behave exactly as before.
+        var valDiff = buy.Value.Value - sell.Value.Value;
+        var maxVal = Math.Max(buy.Value.Value, sell.Value.Value);
+        var valConclusive =
+            maxVal >= MinActiveValue
+            && Math.Abs(valDiff) >= ValueDecisionMargin;
+
+        if (valConclusive)
+        {
+            return new TabDetectionResult(
+                valDiff > 0 ? TerminalTab.Buy : TerminalTab.Sell,
+                buy.Value.Saturation,
+                sell.Value.Saturation,
+                UnknownReason: null,
+                palette);
+        }
+
+        // ---- BOTH AXES INCONCLUSIVE — give up gracefully ------------------------
+        // Surface the most informative reason so the log triage points
+        // at WHY the decision failed (palette + which axis had the
+        // tighter gap). UI fallback (manual tab pick) takes over.
+        var reason = maxSat < MinActiveSaturation
+            ? $"both-grey-and-similar-V (S {buy.Value.Saturation:F1}/{sell.Value.Saturation:F1}, V {buy.Value.Value:F1}/{sell.Value.Value:F1}, palette={palette})"
+            : $"low-margin-on-both-axes (S {buy.Value.Saturation:F1}/{sell.Value.Saturation:F1} |diff|={Math.Abs(satDiff):F1}, V {buy.Value.Value:F1}/{sell.Value.Value:F1} |diff|={Math.Abs(valDiff):F1}, palette={palette})";
 
         return new TabDetectionResult(
-            diff > 0 ? TerminalTab.Buy : TerminalTab.Sell,
-            buySat,
-            sellSat,
-            null);
+            TerminalTab.Unknown,
+            buy.Value.Saturation,
+            sell.Value.Saturation,
+            reason,
+            palette);
     }
 
     /// <summary>
-    /// Computes the mean HSV saturation of the bright pixels inside the
-    /// region. Hue-agnostic by design — works for teal/cyan terminals
-    /// (the typical SC accent) AND for amber/orange terminals (some
-    /// faction stations) AND for any other saturated theme colour. The
-    /// inactive tab is always rendered grey/white, so a saturated active
-    /// label is reliably distinguishable regardless of its specific hue.
+    /// Computes the mean HSV (hue, saturation, value) of the bright pixels
+    /// inside the region. Two-axis design covers BOTH theme families seen
+    /// across SC:
+    ///  • Stanton/teal/amber: inactive tab is grey, active is saturated.
+    ///    Discriminator = SATURATION (S).
+    ///  • Pyro/red: BOTH tabs are saturated red — only brightness differs.
+    ///    Discriminator = VALUE (V).
+    /// Hue is returned for diagnostic palette classification only; the
+    /// decision itself is hue-agnostic.
     ///
-    /// Returns <c>-1</c> when the sampled rectangle is too small or
+    /// Returns <c>null</c> when the sampled rectangle is too small or
     /// contains no bright pixels (caller treats that as "no decision").
     /// </summary>
-    private static double MeasureSaturation(
+    private static LabelSamples? MeasureLabel(
         Mat originalImage,
         PaddleOcrResultRegion region,
         int rightPanelStartX,
@@ -233,7 +292,7 @@ public static class TabDetector
         origX = Math.Clamp(origX, 0, Math.Max(0, originalImage.Width - 1));
         origW = Math.Min(originalImage.Width - origX, origW);
 
-        if (origW < 4 || origH < 4) return -1;
+        if (origW < 4 || origH < 4) return null;
 
         using var roi = new Mat(originalImage, new Rect(origX, origY, origW, origH));
         using var hsv = new Mat();
@@ -244,29 +303,99 @@ public static class TabDetector
         {
             // Mask of "text-bright" pixels — only the rendered glyphs and
             // their close glow. Excludes panel background which would
-            // pull the mean saturation down regardless of tab state.
+            // pull the means down regardless of tab state.
             using var brightMask = new Mat();
             Cv2.Threshold(hsvChannels[2], brightMask, BrightnessFloor, 255, ThresholdTypes.Binary);
 
             var brightCount = Cv2.CountNonZero(brightMask);
-            if (brightCount < 8) return -1;
+            if (brightCount < 8) return null;
 
-            // Mean of the S-channel over the bright-pixel mask.
+            // S-axis mean: discriminates grey vs colored (Stanton/teal).
             // Active label (any saturated colour): typically 130..220.
             // Inactive label (grey/white)        : typically  10.. 50.
-            return Cv2.Mean(hsvChannels[1], brightMask).Val0;
+            var meanS = Cv2.Mean(hsvChannels[1], brightMask).Val0;
+
+            // V-axis mean: discriminates dim vs bright at the same hue
+            // (Pyro/red). Active label sits ~210, inactive ~170.
+            var meanV = Cv2.Mean(hsvChannels[2], brightMask).Val0;
+
+            // Hue mean: only useful for palette classification (red
+            // wraps around 0 and 180 in OpenCV's 0..179 H-channel — we
+            // handle the wrap inside ClassifyPalette).
+            var meanH = Cv2.Mean(hsvChannels[0], brightMask).Val0;
+
+            return new LabelSamples(meanH, meanS, meanV);
         }
         finally
         {
             foreach (var c in hsvChannels) c.Dispose();
         }
     }
+
+    /// <summary>
+    /// Bins the two labels' mean hues into a coarse palette family for
+    /// diagnostic logging. Hue is computed only on bright pixels of the
+    /// label glyphs (panel background already filtered out by
+    /// <see cref="MeasureLabel"/>'s brightness mask) so the result
+    /// reflects the THEME ACCENT, not the panel chrome.
+    ///
+    /// OpenCV's H channel is 0..179 (half of the conventional 0..360),
+    /// with red wrapping around both 0 and 180. We pick the palette
+    /// from whichever label has the higher saturation (the active one
+    /// — its hue is the cleanest sample of the theme accent).
+    /// </summary>
+    private static DetectedPalette ClassifyPalette(LabelSamples buy, LabelSamples sell)
+    {
+        // Pick the more saturated label's hue — it carries the theme
+        // accent. The other one is often grey (Stanton) and would
+        // contribute meaningless hue noise.
+        var dominant = buy.Saturation >= sell.Saturation ? buy : sell;
+        if (dominant.Saturation < 25.0) return DetectedPalette.Unknown;
+
+        var h = dominant.Hue;
+        if (h <= 10 || h >= 170) return DetectedPalette.Red;     // Pyro
+        if (h is > 10 and <= 25) return DetectedPalette.Amber;   // Crusader, some faction terminals
+        if (h is > 25 and <= 40) return DetectedPalette.Yellow;
+        if (h is > 40 and <= 80) return DetectedPalette.Green;
+        if (h is > 80 and <= 100) return DetectedPalette.Teal;   // Stanton classic
+        if (h is > 100 and <= 130) return DetectedPalette.Blue;
+        if (h is > 130 and < 170) return DetectedPalette.Purple;
+        return DetectedPalette.Unknown;
+    }
+
+    /// <summary>Holder for the three HSV channel means measured over a
+    /// label's bright pixels. Used to drive both the saturation-axis
+    /// (Stanton) and value-axis (Pyro) discrimination paths in
+    /// <see cref="Diagnose"/>.</summary>
+    private readonly record struct LabelSamples(double Hue, double Saturation, double Value);
+}
+
+/// <summary>
+/// Coarse classification of the theme accent colour observed on the
+/// label glyphs. Used purely for diagnostic logging so we can tell at a
+/// glance which captures fall back to the V-axis path (Pyro red) vs.
+/// the classic S-axis (Stanton teal/amber). Adding a value here is a
+/// safe operation — no decision logic in <see cref="TabDetector"/>
+/// branches on the palette family; the dual-axis algorithm picks the
+/// right axis automatically based on which gap is conclusive.
+/// </summary>
+public enum DetectedPalette
+{
+    Unknown = 0,
+    Red,    // Pyro stations
+    Amber,  // Crusader Industries-style HUDs
+    Yellow,
+    Green,
+    Teal,   // Stanton classic
+    Blue,
+    Purple,
 }
 
 /// <summary>
 /// Result of <see cref="TabDetector.Diagnose"/>. Carries the decision
-/// plus the raw saturation samples so callers can log or display the
-/// numbers when the detector returned <see cref="TerminalTab.Unknown"/>.
+/// plus the raw saturation samples and the detected theme palette so
+/// callers can log or display the numbers when the detector returned
+/// <see cref="TerminalTab.Unknown"/>.
 /// </summary>
 /// <param name="Tab">Active tab decision (Buy / Sell / Unknown).</param>
 /// <param name="BuySaturation">Mean HSV-S of the BUY label, or
@@ -276,8 +405,13 @@ public static class TabDetector
 /// <param name="UnknownReason">Free-form reason describing why
 /// <see cref="Tab"/> is <see cref="TerminalTab.Unknown"/>; <c>null</c>
 /// when a decision was made.</param>
+/// <param name="Palette">Coarse classification of the theme accent
+/// colour (Pyro red, Stanton teal, Crusader amber, …). Always
+/// populated even on success — useful to spot palette-related
+/// regressions in batch log analysis.</param>
 public readonly record struct TabDetectionResult(
     TerminalTab Tab,
     double? BuySaturation,
     double? SellSaturation,
-    string? UnknownReason);
+    string? UnknownReason,
+    DetectedPalette Palette = DetectedPalette.Unknown);

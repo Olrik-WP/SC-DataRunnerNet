@@ -26,100 +26,280 @@
         <!-- Title bar -->
         <ui:TitleBar Grid.Row="0" Title="{Binding Title}" ShowMaximize="True" ShowMinimize="True" />
 
-        <!-- Body: sidebar + content -->
+        <!-- Body: collapsible sidebar + content (same width pattern as InboxView) -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="220" />
+                <ColumnDefinition>
+                    <ColumnDefinition.Style>
+                        <Style TargetType="ColumnDefinition">
+                            <Setter Property="Width" Value="220" />
+                            <Setter Property="MinWidth" Value="200" />
+                            <Setter Property="MaxWidth" Value="320" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSidebarCollapsed}" Value="True">
+                                    <Setter Property="Width" Value="56" />
+                                    <Setter Property="MinWidth" Value="56" />
+                                    <Setter Property="MaxWidth" Value="56" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ColumnDefinition.Style>
+                </ColumnDefinition>
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- SIDEBAR -->
-            <Border Grid.Column="0" Background="{DynamicResource ApplicationBackgroundBrush}" Padding="16,12">
-                <StackPanel>
-                    <TextBlock Text="SC DataRunner"
-                               FontSize="20" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                               Margin="4,4,4,2" />
-                    <TextBlock Text="Open-source UEX uploader"
-                               FontSize="12" Opacity="0.6"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                               Margin="4,0,4,16" />
+            <Border Grid.Column="0"
+                    Background="{DynamicResource ApplicationBackgroundBrush}"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="0,0,1,0">
+                <Grid>
+                    <!-- Collapsed: icon rail + expand (mirrors inbox column collapse) -->
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Visibility="{Binding IsSidebarCollapsed, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Margin="0,12,0,12" HorizontalAlignment="Center" Width="56">
+                            <ui:Button Command="{Binding ToggleSidebarCollapsedCommand}"
+                                       Appearance="Secondary"
+                                       Width="36" Height="36" Padding="0"
+                                       HorizontalAlignment="Center"
+                                       ToolTip="Expand navigation">
+                                <ui:SymbolIcon Symbol="ChevronRight24" />
+                            </ui:Button>
 
-                    <ui:Button Appearance="Transparent"
-                               Command="{Binding NavigateInboxCommand}"
-                               Margin="0,2"
-                               HorizontalContentAlignment="Stretch"
-                               Padding="12,10">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="MailInbox24" Margin="0,0,12,0" />
-                            <TextBlock Text="Inbox" VerticalAlignment="Center" />
-                            <Border Margin="10,0,0,0" Background="{DynamicResource AccentFillColorDefaultBrush}"
-                                    CornerRadius="10" Padding="6,1"
-                                    Visibility="{Binding Inbox.Items.Count, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="{Binding Inbox.Items.Count}"
-                                           FontSize="11" Foreground="White" />
+                            <Border Margin="0,10,0,0" CornerRadius="4" Padding="2" HorizontalAlignment="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedNavTag}" Value="inbox">
+                                                <Setter Property="Background"
+                                                         Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Grid Width="36" Height="36">
+                                    <ui:Button Command="{Binding NavigateInboxCommand}"
+                                               Appearance="Transparent"
+                                               Width="36" Height="36" Padding="0"
+                                               ToolTip="Inbox">
+                                        <ui:SymbolIcon Symbol="MailInbox24" />
+                                    </ui:Button>
+                                    <Border Margin="0,-2,-2,0" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                            CornerRadius="8" Padding="3,0" MinWidth="14"
+                                            Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                            Visibility="{Binding Inbox.Items.Count, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="{Binding Inbox.Items.Count}"
+                                                   FontSize="9" FontWeight="SemiBold"
+                                                   Foreground="White"
+                                                   HorizontalAlignment="Center" />
+                                    </Border>
+                                </Grid>
+                            </Border>
+
+                            <Border Margin="0,4,0,0" CornerRadius="4" Padding="2" HorizontalAlignment="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedNavTag}" Value="targets">
+                                                <Setter Property="Background"
+                                                         Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <ui:Button Command="{Binding NavigateTargetsCommand}"
+                                           Appearance="Transparent"
+                                           Width="36" Height="36" Padding="0"
+                                           ToolTip="See which (terminal, commodity) pairs need a fresh report most urgently">
+                                    <ui:SymbolIcon Symbol="Target24" />
+                                </ui:Button>
+                            </Border>
+
+                            <Border Margin="0,4,0,0" CornerRadius="4" Padding="2" HorizontalAlignment="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedNavTag}" Value="routes">
+                                                <Setter Property="Background"
+                                                         Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <ui:Button Command="{Binding NavigateRoutesCommand}"
+                                           Appearance="Transparent"
+                                           Width="36" Height="36" Padding="0"
+                                           ToolTip="Profitable trade routes from UEX">
+                                    <ui:SymbolIcon Symbol="Map24" />
+                                </ui:Button>
+                            </Border>
+
+                            <Border Margin="0,4,0,0" CornerRadius="4" Padding="2" HorizontalAlignment="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedNavTag}" Value="history">
+                                                <Setter Property="Background"
+                                                         Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <ui:Button Command="{Binding NavigateHistoryCommand}"
+                                           Appearance="Transparent"
+                                           Width="36" Height="36" Padding="0"
+                                           ToolTip="History">
+                                    <ui:SymbolIcon Symbol="History24" />
+                                </ui:Button>
+                            </Border>
+
+                            <Border Margin="0,4,0,0" CornerRadius="4" Padding="2" HorizontalAlignment="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedNavTag}" Value="diagnostics">
+                                                <Setter Property="Background"
+                                                         Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <ui:Button Command="{Binding NavigateDiagnosticsCommand}"
+                                           Appearance="Transparent"
+                                           Width="36" Height="36" Padding="0"
+                                           ToolTip="Logs, submission details, system info, and bug report export">
+                                    <ui:SymbolIcon Symbol="Bug24" />
+                                </ui:Button>
+                            </Border>
+
+                            <Border Margin="0,4,0,0" CornerRadius="4" Padding="2" HorizontalAlignment="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedNavTag}" Value="settings">
+                                                <Setter Property="Background"
+                                                         Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <ui:Button Command="{Binding NavigateSettingsCommand}"
+                                           Appearance="Transparent"
+                                           Width="36" Height="36" Padding="0"
+                                           ToolTip="Settings">
+                                    <ui:SymbolIcon Symbol="Settings24" />
+                                </ui:Button>
                             </Border>
                         </StackPanel>
-                    </ui:Button>
+                    </ScrollViewer>
 
-                    <ui:Button Appearance="Transparent"
-                               Command="{Binding NavigateTargetsCommand}"
-                               Margin="0,2"
-                               HorizontalContentAlignment="Stretch"
-                               Padding="12,10"
-                               ToolTip="See which (terminal, commodity) pairs need a fresh report most urgently">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="Target24" Margin="0,0,12,0" />
-                            <TextBlock Text="Targets" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </ui:Button>
+                    <!-- Expanded: titles + collapse + full labels -->
+                    <Border Padding="16,12"
+                            Visibility="{Binding IsSidebarCollapsed, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}">
+                        <StackPanel>
+                            <DockPanel LastChildFill="True">
+                                <ui:Button DockPanel.Dock="Right"
+                                             Command="{Binding ToggleSidebarCollapsedCommand}"
+                                             Appearance="Secondary"
+                                             Padding="6" Width="28" Height="28"
+                                             ToolTip="Collapse navigation to icons only (more space for content)">
+                                    <ui:SymbolIcon Symbol="ChevronLeft24" FontSize="14" />
+                                </ui:Button>
+                                <StackPanel>
+                                    <TextBlock Text="SC DataRunner"
+                                               FontSize="20" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                               Margin="4,4,4,2" />
+                                    <TextBlock Text="Open-source UEX uploader"
+                                               FontSize="12" Opacity="0.6"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                               Margin="4,0,4,12" />
+                                </StackPanel>
+                            </DockPanel>
 
-                    <ui:Button Appearance="Transparent"
-                               Command="{Binding NavigateRoutesCommand}"
-                               Margin="0,2"
-                               HorizontalContentAlignment="Stretch"
-                               Padding="12,10"
-                               ToolTip="Profitable trade routes from UEX, ranked with our datarunner-aware stale-refresh overlay">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="Map24" Margin="0,0,12,0" />
-                            <TextBlock Text="Trade routes" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </ui:Button>
+                            <ui:Button Appearance="Transparent"
+                                       Command="{Binding NavigateInboxCommand}"
+                                       Margin="0,2"
+                                       HorizontalContentAlignment="Stretch"
+                                       Padding="12,10">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="MailInbox24" Margin="0,0,12,0" />
+                                    <TextBlock Text="Inbox" VerticalAlignment="Center" />
+                                    <Border Margin="10,0,0,0" Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                            CornerRadius="10" Padding="6,1"
+                                            Visibility="{Binding Inbox.Items.Count, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="{Binding Inbox.Items.Count}"
+                                                   FontSize="11" Foreground="White" />
+                                    </Border>
+                                </StackPanel>
+                            </ui:Button>
 
-                    <ui:Button Appearance="Transparent"
-                               Command="{Binding NavigateHistoryCommand}"
-                               Margin="0,2"
-                               HorizontalContentAlignment="Stretch"
-                               Padding="12,10">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="History24" Margin="0,0,12,0" />
-                            <TextBlock Text="History" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </ui:Button>
+                            <ui:Button Appearance="Transparent"
+                                       Command="{Binding NavigateTargetsCommand}"
+                                       Margin="0,2"
+                                       HorizontalContentAlignment="Stretch"
+                                       Padding="12,10"
+                                       ToolTip="See which (terminal, commodity) pairs need a fresh report most urgently">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Target24" Margin="0,0,12,0" />
+                                    <TextBlock Text="Targets" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ui:Button>
 
-                    <ui:Button Appearance="Transparent"
-                               Command="{Binding NavigateDiagnosticsCommand}"
-                               Margin="0,2"
-                               HorizontalContentAlignment="Stretch"
-                               Padding="12,10"
-                               ToolTip="Logs, submission details, system info, and bug report export">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="Bug24" Margin="0,0,12,0" />
-                            <TextBlock Text="Diagnostics" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </ui:Button>
+                            <ui:Button Appearance="Transparent"
+                                       Command="{Binding NavigateRoutesCommand}"
+                                       Margin="0,2"
+                                       HorizontalContentAlignment="Stretch"
+                                       Padding="12,10"
+                                       ToolTip="Profitable trade routes from UEX, ranked with our datarunner-aware stale-refresh overlay">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Map24" Margin="0,0,12,0" />
+                                    <TextBlock Text="Trade routes" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ui:Button>
 
-                    <ui:Button Appearance="Transparent"
-                               Command="{Binding NavigateSettingsCommand}"
-                               Margin="0,2"
-                               HorizontalContentAlignment="Stretch"
-                               Padding="12,10">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="Settings24" Margin="0,0,12,0" />
-                            <TextBlock Text="Settings" VerticalAlignment="Center" />
+                            <ui:Button Appearance="Transparent"
+                                       Command="{Binding NavigateHistoryCommand}"
+                                       Margin="0,2"
+                                       HorizontalContentAlignment="Stretch"
+                                       Padding="12,10">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="History24" Margin="0,0,12,0" />
+                                    <TextBlock Text="History" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ui:Button>
+
+                            <ui:Button Appearance="Transparent"
+                                       Command="{Binding NavigateDiagnosticsCommand}"
+                                       Margin="0,2"
+                                       HorizontalContentAlignment="Stretch"
+                                       Padding="12,10"
+                                       ToolTip="Logs, submission details, system info, and bug report export">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Bug24" Margin="0,0,12,0" />
+                                    <TextBlock Text="Diagnostics" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ui:Button>
+
+                            <ui:Button Appearance="Transparent"
+                                       Command="{Binding NavigateSettingsCommand}"
+                                       Margin="0,2"
+                                       HorizontalContentAlignment="Stretch"
+                                       Padding="12,10">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Settings24" Margin="0,0,12,0" />
+                                    <TextBlock Text="Settings" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ui:Button>
                         </StackPanel>
-                    </ui:Button>
-                </StackPanel>
+                    </Border>
+                </Grid>
             </Border>
 
             <!-- CONTENT AREA -->

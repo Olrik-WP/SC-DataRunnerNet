@@ -144,7 +144,9 @@ public partial class App : Application
         // we use for OnImportRequested / OnRescanRequested to avoid a circular
         // DI dependency: the inbox is a singleton resolved BEFORE prefs hydrate.
         var prefs = Host.Services.GetRequiredService<IAppPreferences>();
+        var mainVm = Host.Services.GetRequiredService<MainViewModel>();
         inbox.AttachPreferences(prefs);
+        mainVm.AttachPreferences(prefs);
 
         await EnsureCatalogReadyAsync();
 
@@ -154,7 +156,6 @@ public partial class App : Application
         var hasUserBearer = await secretStore.HasBearerTokenAsync();
 
         var mainWindow = Host.Services.GetRequiredService<MainWindow>();
-        var mainVm = Host.Services.GetRequiredService<MainViewModel>();
         mainWindow.DataContext = mainVm;
 
         // Trigger the first-run wizard when the user secret-key is missing,

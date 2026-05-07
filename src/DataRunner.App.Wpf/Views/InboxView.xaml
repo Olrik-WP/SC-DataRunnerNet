@@ -21,9 +21,9 @@
                         <Setter Property="MaxWidth" Value="500" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsCollapsed}" Value="True">
-                                <Setter Property="Width" Value="40" />
-                                <Setter Property="MinWidth" Value="40" />
-                                <Setter Property="MaxWidth" Value="40" />
+                                <Setter Property="Width" Value="52" />
+                                <Setter Property="MinWidth" Value="52" />
+                                <Setter Property="MaxWidth" Value="52" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
@@ -39,27 +39,96 @@
                 BorderThickness="0,0,1,0">
 
             <Grid>
-                <!-- COLLAPSED STRIP — vertical bar with just the expand button +
-                     pending count badge. Lets the user reclaim screen real estate
-                     while keeping the inbox 1 click away. -->
-                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Top"
-                            Margin="0,12,0,0"
-                            Visibility="{Binding IsCollapsed, Converter={StaticResource BoolToVisibility}}">
-                    <ui:Button Command="{Binding ToggleCollapsedCommand}"
-                               Appearance="Secondary"
-                               Width="32" Height="32" Padding="0"
-                               ToolTip="Expand inbox">
-                        <ui:SymbolIcon Symbol="ChevronRight24" />
-                    </ui:Button>
-                    <Border Margin="0,8,0,0" CornerRadius="10" Padding="6,2"
-                            HorizontalAlignment="Center"
-                            Background="{DynamicResource AccentFillColorDefaultBrush}"
-                            Visibility="{Binding Items.Count, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="{Binding Items.Count}"
-                                   FontSize="11" FontWeight="SemiBold"
-                                   Foreground="White" />
-                    </Border>
-                </StackPanel>
+                <!-- COLLAPSED STRIP — expand control + queue count + one clickable
+                     thumbnail per inbox item (same idea as the icon-only nav rail).
+                     Picks the active screenshot/editor without expanding the full list. -->
+                <Grid HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      Visibility="{Binding IsCollapsed, Converter={StaticResource BoolToVisibility}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,12,0,0">
+                        <ui:Button Command="{Binding ToggleCollapsedCommand}"
+                                   Appearance="Secondary"
+                                   Width="32" Height="32" Padding="0"
+                                   ToolTip="Expand inbox">
+                            <ui:SymbolIcon Symbol="ChevronRight24" />
+                        </ui:Button>
+                        <Border Margin="0,8,0,0" CornerRadius="10" Padding="6,2"
+                                HorizontalAlignment="Center"
+                                Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                Visibility="{Binding Items.Count, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="{Binding Items.Count}"
+                                       FontSize="11" FontWeight="SemiBold"
+                                       Foreground="White" />
+                        </Border>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="2"
+                                  Margin="0,10,0,8"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding Items}"
+                                      HorizontalAlignment="Center">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:InboxItem}">
+                                    <ui:Button Appearance="Transparent"
+                                               Padding="0"
+                                               Margin="0,0,0,6"
+                                               HorizontalAlignment="Center"
+                                               Command="{Binding DataContext.SelectFromCollapsedRailCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                               CommandParameter="{Binding}"
+                                               ToolTip="{Binding DisplayName}">
+                                        <Border Width="36"
+                                                Height="36"
+                                                CornerRadius="4"
+                                                ClipToBounds="True"
+                                                Background="#2C2C2C"
+                                                BorderThickness="2"
+                                                Padding="0">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="BorderBrush"
+                                                            Value="Transparent" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Value="True">
+                                                            <DataTrigger.Binding>
+                                                                <MultiBinding Converter="{StaticResource RefEqual}">
+                                                                    <Binding Path="DataContext.SelectedItem"
+                                                                             RelativeSource="{RelativeSource AncestorType=UserControl}" />
+                                                                    <Binding />
+                                                                </MultiBinding>
+                                                            </DataTrigger.Binding>
+                                                            <Setter Property="BorderBrush"
+                                                                    Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <Grid>
+                                                <Image Source="{Binding Thumbnail}"
+                                                       Stretch="UniformToFill" />
+                                                <Border VerticalAlignment="Bottom"
+                                                        HorizontalAlignment="Right"
+                                                        Margin="0,0,2,2"
+                                                        CornerRadius="3"
+                                                        Padding="3,0"
+                                                        Background="#CC000000">
+                                                    <TextBlock Foreground="White"
+                                                               FontSize="8"
+                                                               FontWeight="Bold"
+                                                               Text="{Binding QueuePosition}" />
+                                                </Border>
+                                            </Grid>
+                                        </Border>
+                                    </ui:Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
 
                 <!-- FULL CONTENT — visible only when NOT collapsed. Same layout as
                      before (Import / rescan dropdown / delete / open-folder /
@@ -247,9 +316,19 @@
                                     <!-- Status dot + thumbnail. Click on the thumbnail opens
                                          the full-screen ImageViewer for a careful inspection. -->
                                     <StackPanel Grid.Column="0" Margin="0,0,10,0" VerticalAlignment="Top">
-                                        <Ellipse Width="9" Height="9" Margin="0,2,0,6"
-                                                 HorizontalAlignment="Left"
-                                                 Fill="{Binding Status, Converter={StaticResource InboxStatusToDot}}" />
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                            <Ellipse Width="9" Height="9" Margin="0,2,4,0"
+                                                     VerticalAlignment="Center"
+                                                     Fill="{Binding Status, Converter={StaticResource InboxStatusToDot}}" />
+                                            <Border VerticalAlignment="Center" CornerRadius="4" Padding="4,1"
+                                                    Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                                    ToolTip="Queue position in the inbox">
+                                                <TextBlock FontSize="10" FontWeight="SemiBold" Opacity="0.9">
+                                                    <Run Text="#" />
+                                                    <Run Text="{Binding QueuePosition, Mode=OneWay}" />
+                                                </TextBlock>
+                                            </Border>
+                                        </StackPanel>
                                         <Border Width="96" Height="54" CornerRadius="3" ClipToBounds="True"
                                                 Background="#222"
                                                 Cursor="Hand"

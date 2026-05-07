@@ -375,6 +375,27 @@ public sealed class CommodityParser
             {
                 lastStatus = InventoryStatus.OutOfStock;
                 lastStatusLine = c.OriginalLine;
+                matchedByRegex = true;
+            }
+
+            // INVENTORY-FAMILY fuzzy fallback. Pyro screens render status
+            // labels in TitleCase ("Medium Inventory" instead of Stanton's
+            // "MEDIUM INVENTORY") and the lower-case rendering combined
+            // with the red panel background degrades OCR enough that we
+            // see substitutions the strict regex cannot absorb — eg. the
+            // I↔S misread on the lower-case "i" of Medium → "Medsum
+            // Inventory" observed on Pyro Endgame on 2026-05-07. Rather
+            // than chasing every per-letter confusion in the regex
+            // alternations (which risks cross-matching MAX↔MEDIUM
+            // through their shared INVENTORY suffix), we extract the
+            // MODIFIER prefix on its own and fuzzy-match THAT short
+            // word against the canonical set. The INVENTORY suffix
+            // detection itself is still tolerant of OCR substitutions
+            // via TryExtractInventoryModifier's regex.
+            if (!matchedByRegex && TryFuzzyMatchInventoryStatus(c.OriginalLine) is { } fuzzyStatus)
+            {
+                lastStatus = fuzzyStatus;
+                lastStatusLine = c.OriginalLine;
             }
 
             if (!assignmentLocked
@@ -558,6 +579,98 @@ public sealed class CommodityParser
         return FuzzySharp.Fuzz.WeightedRatio(trimmed, "OUT OF STOCK") >= 70;
     }
 
+    /// <summary>
+    /// Tolerant suffix detector for the word "INVENTORY" with the
+    /// frequent OCR substitutions baked in (I↔1, E↔3, O↔0, R sometimes
+    /// dropped on tight letter spacing). Used as the gate before we
+    /// fuzzy-match the modifier prefix against the canonical status
+    /// list, so the fuzzy fallback only fires on lines that are
+    /// actually inventory labels.
+    /// </summary>
+    private static readonly Regex InventorySuffixRegex = new(
+        @"\b[I1][N][V][E3][N][T][O0][R]?[Y]\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Canonical modifier strings ordered MOST-SPECIFIC first so longer
+    /// phrases ("VERY HIGH") always win over their substrings ("HIGH").
+    /// FUZZY threshold is calibrated per modifier in
+    /// <see cref="TryFuzzyMatchInventoryStatus"/>.
+    /// </summary>
+    private static readonly (string Canonical, InventoryStatus Status)[] InventoryModifiers =
+    {
+        ("VERY HIGH", InventoryStatus.VeryHigh),
+        ("VERY LOW", InventoryStatus.VeryLow),
+        ("MAXIMUM", InventoryStatus.Maximum),
+        ("MEDIUM", InventoryStatus.Medium),
+        ("HIGH", InventoryStatus.High),
+        ("LOW", InventoryStatus.Low),
+        ("MAX", InventoryStatus.Maximum),
+        ("MED", InventoryStatus.Medium),
+        ("FULL", InventoryStatus.Maximum),
+    };
+
+    /// <summary>
+    /// Fuzzy fallback for inventory-status lines the strict
+    /// <see cref="StatusPatterns"/> regex couldn't match. The pipeline
+    /// only invokes this AFTER the regex has failed, so accuracy here
+    /// is a strict win over leaving the row at <c>Unknown</c>.
+    ///
+    /// Strategy:
+    ///   1. Confirm the line is genuinely an inventory label by
+    ///      checking for an "INVENTORY"-like suffix
+    ///      (<see cref="InventorySuffixRegex"/>). Without this guard
+    ///      we would fuzzy-match short prefixes against random
+    ///      commodity names that happen to share a few letters
+    ///      with a modifier.
+    ///   2. Slice off everything from the INVENTORY token onward and
+    ///      take what's LEFT as the modifier candidate. SC always
+    ///      renders the pattern "<MODIFIER> INVENTORY", never the
+    ///      reverse.
+    ///   3. Fuzzy-score the modifier candidate against each canonical
+    ///      modifier; accept if the best score ≥ 75 (calibrated from
+    ///      the 2026-05-07 Pyro logs where "Medsum" → "MEDIUM" sits
+    ///      at ~83% WeightedRatio).
+    ///
+    /// Returns null if no canonical modifier scores high enough — the
+    /// caller leaves the row at <c>Unknown</c> for manual fixup.
+    /// </summary>
+    private static InventoryStatus? TryFuzzyMatchInventoryStatus(string line)
+    {
+        var inventoryMatch = InventorySuffixRegex.Match(line);
+        if (!inventoryMatch.Success) return null;
+
+        var prefix = line[..inventoryMatch.Index].Trim().ToUpperInvariant();
+        if (prefix.Length is < 2 or > 24) return null;
+
+        InventoryStatus? best = null;
+        var bestScore = 0;
+
+        foreach (var (canonical, status) in InventoryModifiers)
+        {
+            // PartialRatio absorbs leading icon glyphs / stray digits
+            // PaddleOCR sometimes prepends to the modifier on tight
+            // panel layouts. WeightedRatio rejects them too aggressively
+            // when prefix is short (≤ 6 chars) — partial is the right
+            // primitive when modifier is a sub-token of a larger
+            // OCR-merged region.
+            var score = FuzzySharp.Fuzz.PartialRatio(prefix, canonical);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = status;
+            }
+        }
+
+        // 75 is the empirical floor: "MEDSUM" vs "MEDIUM" partial-scores
+        // at 83 (5/6 chars match), "MAXE" vs "MAX" at 100, and pure
+        // noise like commodity name fragments stay below 65. The
+        // canonical-list ordering above guarantees longer phrases
+        // ("VERY HIGH") match before their substrings ("HIGH") when
+        // both score equally.
+        return bestScore >= 75 ? best : null;
+    }
+
     private static void AppendReviewFlags(ParsedSubmission submission)
     {
         if (submission.IdTerminal is null)
@@ -600,13 +713,52 @@ public sealed class CommodityParser
         }
     }
 
+    /// <summary>
+    /// Heuristic gate that decides whether a raw OCR line is a plausible
+    /// commodity-name candidate before we hand it to the fuzzy matcher.
+    /// We accept three rendering styles seen across SC themes:
+    ///  • <b>UPPERCASE</b> — Stanton stations use this exclusively
+    ///    (<c>"LARANITE"</c>, <c>"MEDICAL SUPPLIES"</c>).
+    ///  • <b>Title Case</b> — Pyro stations render names with only the
+    ///    first letter of each word capitalised (<c>"Agricium"</c>,
+    ///    <c>"Medical Supplies"</c>, <c>"Altruciatoxin"</c>). The previous
+    ///    "≥60% uppercase" rule rejected these outright, which is why
+    ///    Pyro screenshots produced rows=0 even though the OCR text was
+    ///    perfectly readable.
+    ///  • <b>Mixed-case fragments from OCR noise</b> — only when the FIRST
+    ///    letter of every word is uppercase. Anything looking like a
+    ///    sentence/log line (eg. <c>"Welcome to the trading post"</c>)
+    ///    fails the per-word capitalisation test.
+    /// </summary>
     private static bool LooksLikeNameCandidate(string line)
     {
         if (line.Length < 3) return false;
         var letters = line.Count(char.IsLetter);
         if (letters < 3) return false;
+
+        // STYLE 1: mostly UPPERCASE (Stanton). Same threshold as before
+        // so existing screenshots keep matching identically.
         var upper = line.Count(c => char.IsUpper(c));
-        return upper >= letters * 0.6;
+        if (upper >= letters * 0.6) return true;
+
+        // STYLE 2: per-word Title Case (Pyro). Every word that contains
+        // letters must start with an uppercase letter. We tolerate digits
+        // and a small number of stray-leading-symbol tokens (icon glyphs
+        // PaddleOCR sometimes prepends to a name) by skipping any word
+        // whose first letter isn't… a letter at all.
+        var words = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return false;
+        var titleWords = 0;
+        var lettered = 0;
+        foreach (var w in words)
+        {
+            var firstLetter = w.FirstOrDefault(char.IsLetter);
+            if (firstLetter == default) continue;
+            lettered++;
+            if (char.IsUpper(firstLetter)) titleWords++;
+        }
+        // At least one lettered word AND every lettered word starts uppercase.
+        return lettered > 0 && titleWords == lettered;
     }
 
     private static bool IsUiLabel(string line)

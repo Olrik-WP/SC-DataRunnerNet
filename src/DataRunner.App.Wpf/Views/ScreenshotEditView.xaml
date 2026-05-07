@@ -86,12 +86,12 @@
              - Column 0: scrollable form (always visible)
              - Column 1: GridSplitter (only when side-by-side is on)
              - Column 2: docked ScreenshotPanel (only when side-by-side is on)
-             Min-width on Col 0 (480px) keeps the commodity DataGrid usable;
-             min-width on Col 2 (300px) keeps the screenshot useful. The user
-             can drag the splitter to balance them. -->
+             Min-width on Col 0 (520px) keeps the commodity DataGrid usable;
+             min-width on Col 2 (220px) keeps the screenshot reference visible while
+             favouring form width. The user can drag the splitter to balance them. -->
         <Grid Grid.Row="1" Margin="20,0,20,8">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="3*" MinWidth="520" />
+                <ColumnDefinition Width="5*" MinWidth="520" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition>
                     <ColumnDefinition.Style>
@@ -100,8 +100,8 @@
                             <Setter Property="MinWidth" Value="0" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding SideBySideScreenshot}" Value="True">
-                                    <Setter Property="Width" Value="2*" />
-                                    <Setter Property="MinWidth" Value="280" />
+                                    <Setter Property="Width" Value="1.6*" />
+                                    <Setter Property="MinWidth" Value="220" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
@@ -109,7 +109,7 @@
                 </ColumnDefinition>
             </Grid.ColumnDefinitions>
 
-            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
                 <StackPanel>
 
                 <!-- MERGED-ITEM WARNING — visible only when this submission was built
@@ -360,7 +360,8 @@
                                   CanUserResizeColumns="True"
                                   RowHeight="40"
                                   HorizontalScrollBarVisibility="Auto"
-                                  Background="Transparent">
+                                  Background="Transparent"
+                                  Margin="0,0,4,0">
                             <DataGrid.Columns>
                                 <DataGridTemplateColumn Header="Commodity" Width="2*" MinWidth="160">
                                     <DataGridTemplateColumn.CellTemplate>
@@ -450,7 +451,7 @@
                                      instead of plain text, so the user sees at a glance which OCR results are
                                      trustworthy. Foreground brush comes from MatchSeverity ("Ok"/"Warning"/"Error")
                                      piped through the existing SeverityToBrushConverter. -->
-                                <DataGridTemplateColumn Header="Match" Width="64" MinWidth="56" SortMemberPath="MatchScore">
+                                <DataGridTemplateColumn Header="Match" Width="58" MinWidth="52" SortMemberPath="MatchScore">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <Border CornerRadius="3" Padding="6,2"
@@ -468,15 +469,16 @@
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
 
-                                <DataGridTemplateColumn Width="36">
+                                <DataGridTemplateColumn Width="48" MinWidth="44">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <ui:Button Appearance="Transparent"
-                                                       Padding="4"
+                                                       Padding="6,4"
+                                                       HorizontalAlignment="Center"
                                                        Command="{Binding DataContext.RemoveRowCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                        CommandParameter="{Binding}"
                                                        ToolTip="Remove this row">
-                                                <ui:SymbolIcon Symbol="Delete24" />
+                                                <ui:SymbolIcon Symbol="Delete24" FontSize="16" />
                                             </ui:Button>
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
@@ -523,8 +525,105 @@
                     BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1"
                     Visibility="{Binding SideBySideScreenshot, Converter={StaticResource BoolToVisibility}}">
-                <views:ScreenshotPanel ImageSource="{Binding PreviewImage}"
-                                       HeaderLabel="{Binding SourceImagePath, StringFormat='Screenshot: {0}'}" />
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Merged / multi-file inbox items: switch which source image
+                         is shown (UEX still receives only the primary / first file). -->
+                    <DockPanel Grid.Row="0"
+                               LastChildFill="True"
+                               Margin="6,6,6,2"
+                               Visibility="{Binding HasMultiplePreviewSources, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock DockPanel.Dock="Left"
+                                   Text="Sources"
+                                   VerticalAlignment="Center"
+                                   FontSize="11"
+                                   Opacity="0.65"
+                                   FontWeight="SemiBold"
+                                   Margin="0,0,8,0" />
+                        <ListBox ItemsSource="{Binding PreviewSourceChips}"
+                                 SelectedIndex="{Binding ActivePreviewSourceIndex, Mode=TwoWay}"
+                                 SelectionMode="Single"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Padding="0"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="0,0,6,0" />
+                                    <Setter Property="MinWidth" Value="36" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Center" />
+                                    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <Border x:Name="ChipBd"
+                                                        CornerRadius="4"
+                                                        Padding="10,5"
+                                                        Background="Transparent"
+                                                        BorderThickness="1"
+                                                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                                    <ContentPresenter HorizontalAlignment="Center" />
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter TargetName="ChipBd" Property="Background"
+                                                                Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                                        <Setter TargetName="ChipBd" Property="BorderBrush"
+                                                                Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                                    </Trigger>
+                                                    <MultiTrigger>
+                                                        <MultiTrigger.Conditions>
+                                                            <Condition Property="IsSelected" Value="False" />
+                                                            <Condition Property="IsMouseOver" Value="True" />
+                                                        </MultiTrigger.Conditions>
+                                                        <Setter TargetName="ChipBd" Property="Background"
+                                                                Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                                    </MultiTrigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:PreviewSourceChip}">
+                                    <TextBlock Text="{Binding Label}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               HorizontalAlignment="Center">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground"
+                                                        Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=IsSelected}"
+                                                                 Value="True">
+                                                        <Setter Property="Foreground" Value="White" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+
+                    <views:ScreenshotPanel Grid.Row="1"
+                                           ImageSource="{Binding PreviewImage}"
+                                           HeaderLabel="{Binding PreviewImageHeader}" />
+                </Grid>
             </Border>
         </Grid>
 

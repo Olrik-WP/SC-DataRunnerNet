@@ -34,6 +34,7 @@ public sealed partial class RoutesViewModel : ObservableObject
     private readonly ITradeRouteProvider _provider;
     private readonly IVehicleCatalog _vehicles;
     private readonly ICatalogProvider _catalog;
+    private readonly IAppPreferences _prefs;
     private readonly ILogger<RoutesViewModel> _logger;
     private readonly Dispatcher _uiDispatcher;
 
@@ -81,8 +82,13 @@ public sealed partial class RoutesViewModel : ObservableObject
     /// <summary>Human-readable label of the resolved origin scope (e.g. "CRU-L1", "Crusader").</summary>
     [ObservableProperty] private string? _originScopeLabel;
 
-    /// <summary>Slider value 0 (pure trader profit) … 100 (pure datarunner stale-refresh). Default 30.</summary>
+    /// <summary>Slider value 0 (pure trader profit) … 100 (pure datarunner stale-refresh).
+    /// Default 30 — overridden by the persisted user preference at construction.</summary>
     [ObservableProperty] private double _datarunnerSliderValue = 30.0;
+
+    /// <summary>While true, persistence-side handlers MUST NOT save. Used while
+    /// hydrating from prefs to avoid writing back the value we just loaded.</summary>
+    private bool _suppressPersist;
 
     [ObservableProperty] private int _totalCount;
     [ObservableProperty] private int _filteredCount;
@@ -99,11 +105,13 @@ public sealed partial class RoutesViewModel : ObservableObject
         ITradeRouteProvider provider,
         IVehicleCatalog vehicles,
         ICatalogProvider catalog,
+        IAppPreferences prefs,
         ILogger<RoutesViewModel> logger)
     {
         _provider = provider;
         _vehicles = vehicles;
         _catalog = catalog;
+        _prefs = prefs;
         _logger = logger;
         _uiDispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
 
@@ -118,10 +126,45 @@ public sealed partial class RoutesViewModel : ObservableObject
         ReloadVehicles();
         ReloadFromProvider();
         ReflectProviderQueryIntoUi();
+        HydrateFromPreferences();
         // Pre-populate the suggestion buckets so the dropdowns are not empty on
         // first open, even before the user types anything.
         UpdateOriginSuggestions();
         UpdateDestinationSuggestions();
+    }
+
+    /// <summary>
+    /// Restore the bits of UI state that don't round-trip through the
+    /// <c>TradeRouteQuery</c> cache (vehicle pick, slider position) from the
+    /// persisted user preferences. Must run AFTER
+    /// <see cref="ReloadVehicles"/> so the saved vehicle id can be matched
+    /// against the catalog. Wraps the assignments in a guard flag so the
+    /// regular OnXxxChanged handlers don't trigger a save-back of the value
+    /// we just loaded (no-op in practice but keeps the disk file pristine).
+    /// </summary>
+    private void HydrateFromPreferences()
+    {
+        _suppressPersist = true;
+        try
+        {
+            // Vehicle: match by id when the saved id is still in the
+            // catalog. If the user switched UEX game version and the
+            // vehicle was decommissioned, fall back to "no vehicle filter"
+            // rather than poisoning the persisted state with a stale id.
+            if (_prefs.RoutesSelectedVehicleId is { } vehicleId)
+            {
+                SelectedVehicle = Vehicles.FirstOrDefault(v => v.Id == vehicleId);
+            }
+
+            // Slider: clamp to the [0, 100] range in case prefs.json was
+            // hand-edited or migrated from an older schema with a
+            // different scale.
+            DatarunnerSliderValue = Math.Clamp(_prefs.RoutesDatarunnerSliderValue, 0.0, 100.0);
+        }
+        finally
+        {
+            _suppressPersist = false;
+        }
     }
 
     /// <summary>
@@ -372,8 +415,29 @@ public sealed partial class RoutesViewModel : ObservableObject
 
     private void ReloadVehicles()
     {
+        // Snapshot the selected vehicle id BEFORE the clear so we can
+        // re-attach to the equivalent instance in the new collection. The
+        // alternative — letting WPF reset SelectedVehicle to null because
+        // the old reference is no longer in the ItemsSource — would
+        // trigger OnSelectedVehicleChanged and clobber the persisted prefs
+        // with null on every catalog refresh.
+        var previousId = SelectedVehicle?.Id ?? _prefs.RoutesSelectedVehicleId;
+
         Vehicles.Clear();
         foreach (var v in _vehicles.CargoVehicles) Vehicles.Add(v);
+
+        if (previousId is { } id)
+        {
+            _suppressPersist = true;
+            try
+            {
+                SelectedVehicle = Vehicles.FirstOrDefault(v => v.Id == id);
+            }
+            finally
+            {
+                _suppressPersist = false;
+            }
+        }
     }
 
     private void ReloadFromProvider()
@@ -607,6 +671,7 @@ public sealed partial class RoutesViewModel : ObservableObject
         // Vehicle change only affects client-side filtering (no API call).
         View.Refresh();
         UpdateFilteredCount();
+        PersistRoutesPreferences();
     }
 
     partial void OnDatarunnerSliderValueChanged(double value)
@@ -615,6 +680,36 @@ public sealed partial class RoutesViewModel : ObservableObject
         RecomputeAllScores();
         View.Refresh();
         UpdateFilteredCount();
+        PersistRoutesPreferences();
+    }
+
+    /// <summary>
+    /// Writes the Trade Routes view preferences (vehicle pick, slider
+    /// position) back to disk so they survive an app restart. Fire-and-
+    /// forget: a save failure here is non-fatal — at worst the user re-
+    /// picks their ship next session — so we only log on failure instead
+    /// of surfacing an error to the UI. Suppressed during
+    /// <see cref="HydrateFromPreferences"/> to prevent a redundant write
+    /// of the value we just loaded.
+    /// </summary>
+    private void PersistRoutesPreferences()
+    {
+        if (_suppressPersist) return;
+        _prefs.RoutesSelectedVehicleId = SelectedVehicle?.Id;
+        _prefs.RoutesDatarunnerSliderValue = DatarunnerSliderValue;
+        _ = SaveRoutesPreferencesAsync();
+    }
+
+    private async Task SaveRoutesPreferencesAsync()
+    {
+        try
+        {
+            await _prefs.SaveAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist Trade Routes preferences (vehicle/slider).");
+        }
     }
 
     /// <summary>

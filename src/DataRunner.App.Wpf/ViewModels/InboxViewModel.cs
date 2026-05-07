@@ -125,9 +125,39 @@ public sealed partial class InboxViewModel : ObservableObject
     [RelayCommand]
     private void ToggleCollapsed() => IsCollapsed = !IsCollapsed;
 
+    /// <summary>
+    /// Collapsed inbox rail: pick one queued screenshot without expanding the list.
+    /// Replaces any multi-selection with this single item so the editor + preview match.
+    /// </summary>
+    [RelayCommand]
+    private void SelectFromCollapsedRail(InboxItem? item)
+    {
+        if (item is null) return;
+        SelectedItems.Clear();
+        SelectedItems.Add(item);
+        SelectedItem = item;
+    }
+
     public InboxViewModel()
     {
+        Items.CollectionChanged += OnItemsCollectionChanged;
         SelectedItems.CollectionChanged += OnSelectedItemsChanged;
+    }
+
+    private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        RenumberQueuePositions();
+    }
+
+    /// <summary>
+    /// Refreshes each item's <see cref="InboxItem.QueuePosition"/> (1-based row
+    /// label in the inbox list). Shown as a small badge so screenshots are easy
+    /// to tell apart at a glance.
+    /// </summary>
+    private void RenumberQueuePositions()
+    {
+        for (var i = 0; i < Items.Count; i++)
+            Items[i].QueuePosition = i + 1;
     }
 
     private void OnSelectedItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -417,6 +447,13 @@ public sealed partial class InboxViewModel : ObservableObject
 
 public sealed partial class InboxItem : ObservableObject
 {
+    /// <summary>
+    /// 1-based position in the inbox queue (updated whenever <see cref="InboxViewModel.Items"/>
+    /// changes). Bound in the inbox card as a compact "#N" badge so multiple
+    /// screenshots are visually distinct.
+    /// </summary>
+    [ObservableProperty] private int _queuePosition;
+
     [ObservableProperty] private string _imagePath = "";
     [ObservableProperty] private string _displayName = "";
     [ObservableProperty] private InboxStatus _status = InboxStatus.Pending;

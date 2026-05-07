@@ -83,6 +83,16 @@ public interface IAppPreferences
     bool InboxCollapsed { get; set; }
 
     /// <summary>
+    /// When true, the main navigation sidebar (Inbox / Targets / …) is shrunk
+    /// to a narrow strip with icon-only buttons, freeing horizontal space for
+    /// the main content. Same idea as <see cref="InboxCollapsed"/> but for the
+    /// left app chrome.
+    ///
+    /// Default: false (labels visible).
+    /// </summary>
+    bool SidebarCollapsed { get; set; }
+
+    /// <summary>
     /// When true, the editor renders the source screenshot in a panel docked
     /// to the right of the validation form, with a draggable splitter between
     /// them. Lets the user verify OCR output against the source image without
@@ -93,6 +103,31 @@ public interface IAppPreferences
     /// Default: false (the user opts in via the title-bar toggle).
     /// </summary>
     bool SideBySideScreenshot { get; set; }
+
+    /// <summary>
+    /// UEX vehicle id last picked in the Trade Routes view. Restored on the
+    /// next session so the user doesn't have to re-pick their ship. A null
+    /// here means "no vehicle filter" — the routes view shows every container
+    /// size. Note: routes-related origin/destination/scope/investment values
+    /// are NOT mirrored here because they already round-trip through
+    /// <c>trade_routes_cache.json</c> as part of <c>TradeRouteQuery</c>;
+    /// vehicle is purely a client-side filter that the cache doesn't carry.
+    ///
+    /// Default: null.
+    /// </summary>
+    int? RoutesSelectedVehicleId { get; set; }
+
+    /// <summary>
+    /// Last position of the Trader↔Datarunner blend slider in the Trade
+    /// Routes view (0 = pure trader profit, 100 = pure datarunner refresh
+    /// value). Persisted because rebuilding the routes list with a new
+    /// score weighting is a non-trivial recompute and resetting it on every
+    /// app start is annoying for users who consistently work in datarunner
+    /// mode.
+    ///
+    /// Default: 30 (trader-leaning blend that surfaces both axes).
+    /// </summary>
+    double RoutesDatarunnerSliderValue { get; set; }
 
     /// <summary>Persists the current state to disk.</summary>
     Task SaveAsync(CancellationToken ct = default);

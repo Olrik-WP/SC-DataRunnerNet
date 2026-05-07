@@ -35,7 +35,10 @@ public sealed class JsonAppPreferences : IAppPreferences
     public bool DeleteScreenshotAfterSubmit { get; set; } = true;
     public bool DefaultIsProduction { get; set; } = true;
     public bool InboxCollapsed { get; set; } = false;
+    public bool SidebarCollapsed { get; set; } = false;
     public bool SideBySideScreenshot { get; set; } = false;
+    public int? RoutesSelectedVehicleId { get; set; }
+    public double RoutesDatarunnerSliderValue { get; set; } = 30.0;
 
     public JsonAppPreferences(string? overridePath = null)
     {
@@ -67,7 +70,10 @@ public sealed class JsonAppPreferences : IAppPreferences
             DeleteScreenshotAfterSubmit = dto.DeleteScreenshotAfterSubmit;
             DefaultIsProduction = dto.DefaultIsProduction;
             InboxCollapsed = dto.InboxCollapsed;
+            SidebarCollapsed = dto.SidebarCollapsed;
             SideBySideScreenshot = dto.SideBySideScreenshot;
+            RoutesSelectedVehicleId = dto.RoutesSelectedVehicleId;
+            RoutesDatarunnerSliderValue = dto.RoutesDatarunnerSliderValue;
         }
         catch
         {
@@ -93,7 +99,10 @@ public sealed class JsonAppPreferences : IAppPreferences
                 DeleteScreenshotAfterSubmit = DeleteScreenshotAfterSubmit,
                 DefaultIsProduction = DefaultIsProduction,
                 InboxCollapsed = InboxCollapsed,
+                SidebarCollapsed = SidebarCollapsed,
                 SideBySideScreenshot = SideBySideScreenshot,
+                RoutesSelectedVehicleId = RoutesSelectedVehicleId,
+                RoutesDatarunnerSliderValue = RoutesDatarunnerSliderValue,
             };
             var json = JsonSerializer.Serialize(dto, JsonOpts);
             await File.WriteAllTextAsync(_filePath, json, ct).ConfigureAwait(false);
@@ -141,6 +150,14 @@ public sealed class JsonAppPreferences : IAppPreferences
         public bool DeleteScreenshotAfterSubmit { get; set; } = true;
         public bool DefaultIsProduction { get; set; } = true;
         public bool InboxCollapsed { get; set; } = false;
+        public bool SidebarCollapsed { get; set; } = false;
         public bool SideBySideScreenshot { get; set; } = false;
+
+        /// <summary>UEX vehicle id last picked in the Trade Routes view, or
+        /// <c>null</c> for "no vehicle filter".</summary>
+        public int? RoutesSelectedVehicleId { get; set; }
+
+        /// <summary>Last Trader↔Datarunner slider position (0..100, default 30).</summary>
+        public double RoutesDatarunnerSliderValue { get; set; } = 30.0;
     }
 }
