@@ -145,18 +145,25 @@ override at any time).
 
 ## Your first upload (60-second tour)
 
-1. Take a screenshot of any commodity terminal in Star Citizen with
-   **Print Screen** (`Impr. écran`).
-2. Alt-tab to SC-DataRunner — the new file pops in the **Inbox** within a
+1. At the commodity terminal kiosk, **navigate into the terminal first** —
+   press the arrow button next to the terminal name so its name appears in
+   the top banner. The OCR pipeline reads that banner to identify the
+   terminal; if you screenshot the outer "Your Inventories" list instead,
+   the terminal name will not be detected.
+
+   ![Select the terminal before screenshotting](docs/images/terminals.png)
+
+2. Take a screenshot with **Print Screen** (`Impr. écran`).
+3. Alt-tab to SC-DataRunner — the new file pops in the **Inbox** within a
    second, OCR runs (~2-30 s), the card turns green when ready.
-3. Click the card. The validation editor opens. Cross-check SCU / price /
+4. Click the card. The validation editor opens. Cross-check SCU / price /
    status against the screenshot — toggle **Side-by-side** if you want
    the image docked next to the form.
-4. Fix any orange/red row (orange = warning, red = blocking; the override
+5. Fix any orange/red row (orange = warning, red = blocking; the override
    checkbox lets you ship anyway after manual review).
-5. Click **Validate**, then **Send**. The confirmation dialog shows the live
+6. Click **Validate**, then **Send**. The confirmation dialog shows the live
    diff vs UEX prices and the exact JSON about to be POSTed. Confirm → done.
-6. The card moves to **History**, the screenshot is auto-deleted (if
+7. The card moves to **History**, the screenshot is auto-deleted (if
    that preference is on), and your submission counts toward UEX
    datarunner stats.
 
