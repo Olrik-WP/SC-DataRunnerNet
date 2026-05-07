@@ -1,0 +1,326 @@
+<Window x:Class="DataRunner.App.Views.Dialogs.BatchPreviewDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:vm="clr-namespace:DataRunner.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        d:DataContext="{d:DesignInstance Type=vm:BatchPreviewViewModel}"
+        mc:Ignorable="d"
+        Title="Send batch — preview"
+        Width="1180" Height="780"
+        MinWidth="900" MinHeight="560"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource ApplicationBackgroundBrush}">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- HEADER -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock Text="Send batch — preview"
+                       FontSize="22" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            <TextBlock Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                <Run Text="Each validated screenshot is sent in its own POST so UEX gets the matching visual evidence — the smart-split tab redistributes commodities so no " />
+                <Run Text="(terminal, commodity)" FontFamily="Cascadia Mono, Consolas, monospace" />
+                <Run Text=" pair is sent twice within UEX's 5-min window. The JSON tab shows the EXACT body we will POST for each screenshot." />
+            </TextBlock>
+        </StackPanel>
+
+        <!-- SEND CONTEXT — surfaces the global flags that control how the
+             batch behaves (mode, branch, screenshot attachment, post-submit
+             cleanup, throttle). Mirrors what ConfirmSubmitDialog shows so
+             the user has the same level of pre-flight visibility for batch
+             sends as they do for single sends. -->
+        <Border Grid.Row="1" Margin="0,0,0,10" Padding="12,10" CornerRadius="4"
+                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+            <StackPanel>
+                <TextBlock Text="What this Send all will do"
+                           FontWeight="SemiBold" FontSize="12" Margin="0,0,0,6"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <WrapPanel>
+                    <!-- Mode pill -->
+                    <Border Padding="8,3" CornerRadius="3" Margin="0,0,6,4">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#BF92700A" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsProductionMode}" Value="True">
+                                        <Setter Property="Background" Value="#BFC0392B" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsMixedMode}" Value="True">
+                                        <Setter Property="Background" Value="#BF6E22D9" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="White"
+                                   Text="{Binding ModeLabel, Mode=OneWay}" />
+                    </Border>
+
+                    <!-- Branch pill -->
+                    <Border Padding="8,3" CornerRadius="3" Margin="0,0,6,4">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#BF1A7A3F" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasPtuItems}" Value="True">
+                                        <Setter Property="Background" Value="#BFB45309" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsMixedBranch}" Value="True">
+                                        <Setter Property="Background" Value="#BF6E22D9" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="White"
+                                   Text="{Binding BranchLabel, Mode=OneWay}" />
+                    </Border>
+
+                    <!-- Attach screenshots pill -->
+                    <Border Padding="8,3" CornerRadius="3" Margin="0,0,6,4">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#BF1A4D7A" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding AttachScreenshot}" Value="False">
+                                        <Setter Property="Background" Value="#BF92700A" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="White"
+                                   Text="{Binding AttachScreenshotLabel, Mode=OneWay}" />
+                    </Border>
+
+                    <!-- Delete after submit pill -->
+                    <Border Padding="8,3" CornerRadius="3" Margin="0,0,6,4">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#BF7A4D1A" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding DeleteAfterSubmit}" Value="False">
+                                        <Setter Property="Background" Value="#BF555555" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="White"
+                                   Text="{Binding DeleteAfterSubmitLabel, Mode=OneWay}" />
+                    </Border>
+
+                    <!-- Throttle pill -->
+                    <Border Padding="8,3" CornerRadius="3" Margin="0,0,6,4"
+                            Background="#BF555555">
+                        <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="White"
+                                   Text="{Binding ThrottleLabel, Mode=OneWay}" />
+                    </Border>
+
+                    <!-- Estimated duration pill -->
+                    <Border Padding="8,3" CornerRadius="3" Margin="0,0,6,4"
+                            Background="#BF555555">
+                        <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="White"
+                                   Text="{Binding EstimatedDurationLabel, Mode=OneWay}" />
+                    </Border>
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- EXPLAINER BAND — quick legend of the Reason column. Stays just
+             above the tabs because both views (smart-split + per-payload)
+             refer to the same Kept / Removed semantics. -->
+        <Border Grid.Row="2" Margin="0,0,0,10" Padding="10,7" CornerRadius="4"
+                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+            <DockPanel>
+                <ui:SymbolIcon Symbol="Info20" Margin="0,0,8,0" Opacity="0.75" />
+                <TextBlock TextWrapping="Wrap" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+                    <Run Text="Kept" Foreground="#A5D6A7" FontWeight="SemiBold" /><Run Text=" rows are sent on the screenshot they were captured on. " />
+                    <Run Text="Removed" Foreground="#EF9A9A" FontWeight="SemiBold" /><Run Text=" rows are skipped because a more recent screenshot of the SAME terminal AND SAME tab (BUY/SELL) already carries them — UEX would otherwise reject the older one with " /><Run Text="duplicated_report" FontFamily="Cascadia Mono, Consolas, monospace" /><Run Text=". A BUY screen and a SELL screen of the same terminal are NEVER deduped against each other (UEX stores them separately)." />
+                </TextBlock>
+            </DockPanel>
+        </Border>
+
+        <!-- BODY: 2 tabs — smart-split summary (default) + exact JSON per
+             submission. The user lands on the smart-split because that's the
+             faster sanity check; power users / debugging flips to JSON to
+             see the literal wire body. -->
+        <TabControl Grid.Row="3"
+                    Background="Transparent"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1">
+
+            <!-- TAB 1: Smart-split summary -->
+            <TabItem Header="Smart-split summary">
+                <DataGrid ItemsSource="{Binding Rows}"
+                          AutoGenerateColumns="False"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="None"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          CanUserReorderColumns="False"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          RowHeight="32"
+                          IsReadOnly="True"
+                          Background="Transparent"
+                          BorderThickness="0"
+                          RowBackground="Transparent"
+                          AlternatingRowBackground="{DynamicResource ControlFillColorDefaultBrush}">
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsKept}" Value="False">
+                                    <Setter Property="Background" Value="#22C8504F" />
+                                    <Setter Property="ToolTip" Value="This commodity will NOT be sent on the screenshot it was captured on. See the Reason column for details." />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
+                    <DataGrid.Resources>
+                        <Style x:Key="BatchPreviewCellText" TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <Setter Property="VerticalAlignment" Value="Center" />
+                            <Setter Property="Margin" Value="6,0,4,0" />
+                        </Style>
+                    </DataGrid.Resources>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Commodity" Width="2*" MinWidth="160"
+                                            Binding="{Binding CommodityLabel}"
+                                            ElementStyle="{StaticResource BatchPreviewCellText}" />
+                        <DataGridTextColumn Header="Terminal" Width="2*" MinWidth="180"
+                                            Binding="{Binding TerminalLabel}"
+                                            ElementStyle="{StaticResource BatchPreviewCellText}" />
+                        <DataGridTextColumn Header="Side" Width="60" MinWidth="55"
+                                            Binding="{Binding SideLabel}"
+                                            ElementStyle="{StaticResource BatchPreviewCellText}" />
+                        <DataGridTextColumn Header="Found on" Width="80" MinWidth="70"
+                                            Binding="{Binding FoundOnLabel}"
+                                            ElementStyle="{StaticResource BatchPreviewCellText}" />
+                        <DataGridTextColumn Header="Sent on" Width="80" MinWidth="70"
+                                            Binding="{Binding SentOnLabel}"
+                                            ElementStyle="{StaticResource BatchPreviewCellText}" />
+                        <DataGridTextColumn Header="Reason" Width="3*" MinWidth="180"
+                                            Binding="{Binding Reason}"
+                                            ElementStyle="{StaticResource BatchPreviewCellText}" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <!-- TAB 2: Per-screenshot payload (exact JSON wire body) -->
+            <TabItem Header="Exact JSON sent to UEX">
+                <Grid Margin="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="280" MinWidth="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- LEFT: list of submissions, one per outgoing POST. -->
+                    <Border Grid.Column="0"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="0,0,1,0">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top"
+                                       Text="Outgoing POSTs"
+                                       FontWeight="SemiBold" FontSize="12"
+                                       Margin="12,10,12,6"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBlock DockPanel.Dock="Top"
+                                       Text="Pick a screenshot to inspect its exact JSON body."
+                                       FontSize="11"
+                                       Margin="12,0,12,8"
+                                       TextWrapping="Wrap"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <ListBox ItemsSource="{Binding Submissions}"
+                                     SelectedItem="{Binding SelectedSubmission, Mode=TwoWay}"
+                                     Background="Transparent"
+                                     BorderThickness="0">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,2">
+                                            <TextBlock Text="{Binding DisplayLabel}"
+                                                       FontWeight="SemiBold" FontSize="12"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                            <TextBlock Text="{Binding ImageName}"
+                                                       FontSize="10" Opacity="0.7"
+                                                       FontFamily="Cascadia Mono, Consolas, monospace"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- RIGHT: JSON viewer for the currently-selected submission. -->
+                    <DockPanel Grid.Column="1" Margin="12,10,12,10">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                            <TextBlock Text="Wire body for the selected submission"
+                                       FontWeight="SemiBold" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                       FontSize="11" Opacity="0.55"
+                                       Text="POST https://api.uexcorp.space/2.0/data_submit"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </DockPanel>
+                        <Border DockPanel.Dock="Top" Margin="0,0,0,6" Padding="8,5"
+                                CornerRadius="3"
+                                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                            <TextBlock Text="{Binding SelectedSubmissionScreenshotInfo}"
+                                       FontSize="11" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        </Border>
+                        <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="1" CornerRadius="3">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Auto">
+                                <TextBox Text="{Binding SelectedSubmissionJson, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         Background="Transparent" BorderThickness="0"
+                                         FontFamily="Cascadia Mono, Consolas, monospace" FontSize="11"
+                                         TextWrapping="NoWrap"
+                                         Padding="10,8" />
+                            </ScrollViewer>
+                        </Border>
+                    </DockPanel>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <!-- FOOTER: stats + Cancel / Send. -->
+        <Border Grid.Row="4" Margin="0,16,0,0" Padding="0,12,0,0"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                BorderThickness="0,1,0,0">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                            HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <ui:Button Padding="16,7" Margin="0,0,8,0"
+                               Appearance="Secondary"
+                               Click="OnCancelClick"
+                               Content="Cancel" />
+                    <ui:Button Padding="22,7"
+                               Appearance="Primary"
+                               Click="OnSendClick">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Send all" FontWeight="SemiBold" />
+                            <ui:SymbolIcon Symbol="Send24" Margin="8,0,0,0" />
+                        </StackPanel>
+                    </ui:Button>
+                </StackPanel>
+                <TextBlock Text="{Binding Summary}" VerticalAlignment="Center"
+                           FontSize="12"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

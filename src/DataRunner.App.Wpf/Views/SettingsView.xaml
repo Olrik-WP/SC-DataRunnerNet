@@ -201,9 +201,41 @@
                               Content="Send submissions in PRODUCTION mode (is_production = 1)" />
                     <TextBlock TextWrapping="Wrap" Opacity="0.75" FontSize="11" Margin="22,0,0,0"
                                Text="When enabled (default), reports go live on UEX and update the public commodity prices everyone uses for trade routes — this is the standard datarunner mode. Disable to send everything as TEST instead: UEX still receives the data and you can review it in your account, but it won't affect public prices. Useful for debugging or when you're unsure of your OCR results." />
-                    <TextBlock TextWrapping="Wrap" Opacity="0.65" FontSize="11" Margin="22,4,0,0"
+                    <TextBlock TextWrapping="Wrap" Opacity="0.65" FontSize="11" Margin="22,4,0,16"
                                FontStyle="Italic"
                                Text="Independent of LIVE/PTU game build: this flag controls how UEX uses your report. The game build (game_version) is auto-detected from the source folder — see Screenshots folders below." />
+
+                    <!-- BATCH THROTTLE — controls the delay inserted between two
+                         consecutive POSTs of the same Send batch run. The
+                         smart-split planner (see Inbox > Send batch) already
+                         eliminates intra-batch (terminal, commodity) duplicates
+                         so a small throttle is mostly there to avoid bursting
+                         the UEX rate counter (1000 reports / 30 min). -->
+                    <Border BorderThickness="0,1,0,0" Padding="0,14,0,0"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                        <StackPanel>
+                            <TextBlock Text="Batch send throttle"
+                                       FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="11" Margin="0,4,0,8"
+                                       Text="Delay (in milliseconds) inserted between two consecutive POSTs when sending a batch of validated screenshots. UEX caps reports at 1000 per 30 minutes; a small delay avoids bursting the rate counter on large batches. Set to 0 to send back-to-back without throttling." />
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center"
+                                           Margin="8,0,0,0" Opacity="0.7" FontSize="11"
+                                           Text="ms between submissions" />
+                                <ui:NumberBox Value="{Binding BatchSubmissionDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                              Width="120"
+                                              Minimum="0"
+                                              Maximum="60000"
+                                              SmallChange="100"
+                                              LargeChange="1000"
+                                              ClearButtonEnabled="False"
+                                              HorizontalAlignment="Left" />
+                            </DockPanel>
+                            <TextBlock TextWrapping="Wrap" Opacity="0.6" FontSize="11" Margin="0,6,0,0"
+                                       FontStyle="Italic"
+                                       Text="Note: UEX also rejects two reports for the same (terminal, commodity) within 5 minutes (duplicated_report). The Send batch flow uses smart-split to eliminate these duplicates automatically — you don't need a 5-minute delay between submissions." />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </ui:Card>
 

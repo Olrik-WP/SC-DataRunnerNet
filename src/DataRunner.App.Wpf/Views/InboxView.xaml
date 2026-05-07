@@ -16,9 +16,11 @@
             <ColumnDefinition>
                 <ColumnDefinition.Style>
                     <Style TargetType="ColumnDefinition">
-                        <Setter Property="Width" Value="320" />
-                        <Setter Property="MinWidth" Value="240" />
-                        <Setter Property="MaxWidth" Value="500" />
+                        <!-- Slightly wider default so the toolbar row (Import / rescan /
+                             delete / open-folder) does not clip on typical layouts. -->
+                        <Setter Property="Width" Value="380" />
+                        <Setter Property="MinWidth" Value="300" />
+                        <Setter Property="MaxWidth" Value="560" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsCollapsed}" Value="True">
                                 <Setter Property="Width" Value="52" />
@@ -209,11 +211,53 @@
                                     </ContextMenu>
                                 </ui:Button.ContextMenu>
                             </ui:Button>
-                            <ui:Button Margin="8,0,0,0"
-                                       Command="{Binding RemoveSelectedCommand}"
+                            <!-- Trash dropdown — single click runs the default
+                                 (Remove selected); the chevron opens a menu of
+                                 bulk variants (Remove all sent / failed / all).
+                                 Same UI affordance as the Re-scan button so the
+                                 toolbar feels coherent. -->
+                            <ui:Button x:Name="TrashButton"
+                                       Margin="8,0,0,0"
+                                       Click="OnTrashButtonClick"
                                        Padding="10,7"
-                                       ToolTip="Remove selected from inbox">
-                                <ui:SymbolIcon Symbol="Delete24" />
+                                       ToolTip="Remove from inbox. Click for selected, or use the menu for bulk delete (sent / failed / all).">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Delete24" />
+                                    <ui:SymbolIcon Symbol="ChevronDown24" Margin="4,0,0,0" FontSize="11" Opacity="0.7" />
+                                </StackPanel>
+                                <ui:Button.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Remove selected"
+                                                  Command="{Binding RemoveSelectedCommand}">
+                                            <MenuItem.Icon>
+                                                <ui:SymbolIcon Symbol="Delete24" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <Separator />
+                                        <MenuItem Header="Remove all sent"
+                                                  Command="{Binding RemoveAllSentCommand}"
+                                                  ToolTip="Drops every Sent item from the inbox. Their submission entry stays in History.">
+                                            <MenuItem.Icon>
+                                                <ui:SymbolIcon Symbol="CheckmarkCircle24" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Header="Remove all failed"
+                                                  Command="{Binding RemoveAllFailedCommand}"
+                                                  ToolTip="Drops every Failed item. Useful after triaging which ones you want to retry vs. discard.">
+                                            <MenuItem.Icon>
+                                                <ui:SymbolIcon Symbol="ErrorCircle24" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <Separator />
+                                        <MenuItem Header="Remove ALL (with confirm)"
+                                                  Command="{Binding RemoveAllCommand}"
+                                                  ToolTip="Clears the entire inbox. Items currently being OCR-processed are kept.">
+                                            <MenuItem.Icon>
+                                                <ui:SymbolIcon Symbol="Broom24" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                    </ContextMenu>
+                                </ui:Button.ContextMenu>
                             </ui:Button>
                             <ui:Button Margin="8,0,0,0"
                                        Command="{Binding OpenScreenshotsFolderCommand}"
@@ -223,38 +267,73 @@
                             </ui:Button>
                         </StackPanel>
 
-                        <!-- Merge action — visible only when 2+ items with successful OCR are selected.
-                             Heads-up rendered as a tooltip: UEX accepts only ONE screenshot per
-                             /data_submit POST. Merging consolidates the data rows but only the FIRST
-                             source screenshot is attached. New datarunners (UEX 90-day evaluation
-                             period) may see the submission rejected for rows whose visual evidence
-                             isn't on that single attached screenshot — submit screenshots one by
-                             one until UEX validates you. -->
-                        <ui:Button Margin="0,8,0,0"
-                                   HorizontalAlignment="Stretch"
-                                   HorizontalContentAlignment="Center"
-                                   Appearance="Secondary"
-                                   Command="{Binding MergeSelectedCommand}"
-                                   Padding="10,8"
-                                   Visibility="{Binding CanMergeSelected, Converter={StaticResource BoolToVisibility}}">
-                            <ui:Button.ToolTip>
-                                <ToolTip MaxWidth="380">
-                                    <StackPanel>
-                                        <TextBlock FontWeight="SemiBold" Text="Combine selected screenshots into ONE submission" />
-                                        <TextBlock Margin="0,4,0,0" TextWrapping="Wrap"
-                                                   Text="Useful when a terminal has more commodities than the in-game UI shows at once. Rows are deduplicated, container sizes are unioned." />
-                                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Foreground="#F0AD4E"
-                                                   Text="⚠ NEW DATARUNNER WARNING" />
-                                        <TextBlock Margin="0,2,0,0" TextWrapping="Wrap"
-                                                   Text="UEX accepts only ONE screenshot per submission. Merging attaches the FIRST screenshot only — other rows have no visual evidence. While you're in the 90-day evaluation period, this can lead to rejections. Submit screenshots one by one until UEX validates you." />
+                        <!-- BATCH SEND TOOLBAR
+                             Primary line: "Send batch (X / Y ready)" — only enabled
+                             when EVERY non-terminal item is Validated AND at least
+                             one is. The button itself opens the BatchPreviewDialog
+                             with the smart-split plan; the user confirms; the
+                             submitter then fires the per-item POSTs sequentially.
+                             Secondary line: "Retry failed (N)" / "Stop batch" —
+                             visible only when relevant. -->
+                        <Border Margin="0,12,0,0" Padding="0,8,0,0"
+                                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="0,1,0,0">
+                            <StackPanel>
+                                <ui:Button HorizontalAlignment="Stretch"
+                                           HorizontalContentAlignment="Center"
+                                           Appearance="Primary"
+                                           Padding="10,9"
+                                           Command="{Binding SendBatchCommand}"
+                                           ToolTip="Plans the smart-split batch and shows the preview dialog before any POST. Disabled until every screenshot has been validated.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Send24" Margin="0,0,8,0" />
+                                        <TextBlock FontWeight="SemiBold">
+                                            <Run Text="Send batch (" /><Run Text="{Binding BatchSummary, Mode=OneWay}" /><Run Text=")" />
+                                        </TextBlock>
                                     </StackPanel>
-                                </ToolTip>
-                            </ui:Button.ToolTip>
-                            <StackPanel Orientation="Horizontal">
-                                <ui:SymbolIcon Symbol="ImageMultiple24" Margin="0,0,6,0" />
-                                <TextBlock Text="Merge selected" />
+                                </ui:Button>
+                                <DockPanel Margin="0,8,0,0">
+                                    <ui:Button DockPanel.Dock="Right"
+                                               HorizontalAlignment="Right"
+                                               Appearance="Caution"
+                                               Padding="10,6"
+                                               Command="{Binding StopBatchCommand}"
+                                               Visibility="{Binding IsBatchInProgress, Converter={StaticResource BoolToVisibility}}"
+                                               ToolTip="Cancels the in-flight batch. The current POST finishes; remaining items stay Validated for a later send.">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ui:SymbolIcon Symbol="Stop24" Margin="0,0,4,0" />
+                                            <TextBlock Text="Stop" FontSize="11" />
+                                        </StackPanel>
+                                    </ui:Button>
+                                    <ui:Button HorizontalAlignment="Stretch"
+                                               HorizontalContentAlignment="Center"
+                                               Appearance="Secondary"
+                                               Padding="10,6"
+                                               Command="{Binding RetryFailedCommand}"
+                                               Visibility="{Binding HasFailedItems, Converter={StaticResource BoolToVisibility}}"
+                                               ToolTip="Re-arms a Send batch run on the Failed items only. Useful after a transient HTTP 5xx the auto-retry couldn't ride out.">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ui:SymbolIcon Symbol="ArrowClockwise24" Margin="0,0,6,0" />
+                                            <TextBlock>
+                                                <Run Text="Retry failed (" /><Run Text="{Binding FailedCount, Mode=OneWay}" /><Run Text=")" />
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </ui:Button>
+                                </DockPanel>
+                                <!-- In-flight progress hint. Visible only during a batch run. -->
+                                <Border Margin="0,8,0,0" Padding="8,5" CornerRadius="4"
+                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                        Visibility="{Binding IsBatchInProgress, Converter={StaticResource BoolToVisibility}}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:ProgressRing IsIndeterminate="True" Width="14" Height="14"
+                                                         VerticalAlignment="Center" Margin="0,0,8,0" />
+                                        <TextBlock FontSize="11" Opacity="0.85"
+                                                   VerticalAlignment="Center"
+                                                   Text="Batch in progress... watch each card for per-item status." />
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
-                        </ui:Button>
+                        </Border>
                     </StackPanel>
                 </Border>
 
@@ -314,7 +393,9 @@
                                     </Grid.ColumnDefinitions>
 
                                     <!-- Status dot + thumbnail. Click on the thumbnail opens
-                                         the full-screen ImageViewer for a careful inspection. -->
+                                         the full-screen ImageViewer for a careful inspection.
+                                         Overlay badges: a green check-circle when Validated,
+                                         a small spinner + "Sending..." when Sending. -->
                                     <StackPanel Grid.Column="0" Margin="0,0,10,0" VerticalAlignment="Top">
                                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                             <Ellipse Width="9" Height="9" Margin="0,2,4,0"
@@ -327,6 +408,33 @@
                                                     <Run Text="#" />
                                                     <Run Text="{Binding QueuePosition, Mode=OneWay}" />
                                                 </TextBlock>
+                                            </Border>
+                                            <!-- VALIDATED badge — small green check next to the queue # -->
+                                            <Border Margin="4,0,0,0" CornerRadius="8" Padding="4,1"
+                                                    VerticalAlignment="Center"
+                                                    Background="#1FA34A"
+                                                    ToolTip="Validated &#x2014; will be included in the next batch send"
+                                                    Visibility="{Binding IsValidated, Converter={StaticResource BoolToVisibility}}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="&#xE73E;" FontFamily="Segoe MDL2 Assets"
+                                                               FontSize="10" Foreground="White" />
+                                                    <TextBlock Text="OK" FontSize="9" FontWeight="SemiBold"
+                                                               Foreground="White" Margin="3,0,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <!-- SENDING badge — visible only while this item's POST is in flight. -->
+                                            <Border Margin="4,0,0,0" CornerRadius="8" Padding="4,1"
+                                                    VerticalAlignment="Center"
+                                                    Background="#2F8FCB"
+                                                    ToolTip="POST in flight..."
+                                                    Visibility="{Binding IsSending, Converter={StaticResource BoolToVisibility}}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <ui:ProgressRing IsIndeterminate="True"
+                                                                     Width="10" Height="10"
+                                                                     VerticalAlignment="Center" />
+                                                    <TextBlock Text="Sending" FontSize="9" FontWeight="SemiBold"
+                                                               Foreground="White" Margin="3,0,0,0" />
+                                                </StackPanel>
                                             </Border>
                                         </StackPanel>
                                         <Border Width="96" Height="54" CornerRadius="3" ClipToBounds="True"

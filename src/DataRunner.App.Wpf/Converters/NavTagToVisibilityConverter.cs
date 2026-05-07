@@ -130,6 +130,8 @@ public sealed class SeverityToBrushConverter : IValueConverter
 ///   Processing → soft blue (work in progress)
 ///   Ready      → muted green (clean, ready to send)
 ///   Review     → muted amber (needs user attention)
+///   Validated  → vivid green tint (user-confirmed, queued for batch)
+///   Sending    → bright blue tint (POST in flight)
 ///   Sent       → solid green tint + left bar (terminal state)
 ///   Failed     → muted red
 /// </summary>
@@ -143,6 +145,8 @@ public sealed class InboxStatusToBrushConverter : IValueConverter
             "Processing" => Brush("#222F8FCB"),  // soft blue
             "Ready"      => Brush("#2532A852"),  // muted green
             "Review"     => Brush("#28DAA520"),  // muted amber
+            "Validated"  => Brush("#552ECC71"),  // vivid green (confirmed)
+            "Sending"    => Brush("#552F8FCB"),  // vivid blue (in flight)
             "Sent"       => Brush("#3532A852"),  // stronger green
             "Failed"     => Brush("#33C8504F"),  // muted red
             _            => Brush("#1AFFFFFF"),  // gray fallback (Pending)
@@ -175,10 +179,65 @@ public sealed class InboxStatusToDotBrushConverter : IValueConverter
             "Processing" => System.Windows.Media.Brushes.SteelBlue,
             "Ready"      => System.Windows.Media.Brushes.MediumSeaGreen,
             "Review"     => System.Windows.Media.Brushes.Goldenrod,
+            "Validated"  => System.Windows.Media.Brushes.LimeGreen,
+            "Sending"    => System.Windows.Media.Brushes.DodgerBlue,
             "Sent"       => System.Windows.Media.Brushes.MediumSeaGreen,
             "Failed"     => System.Windows.Media.Brushes.IndianRed,
             _            => System.Windows.Media.Brushes.Gray,
         };
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Pretty-prints the <see cref="DataRunner.Core.Models.InventoryStatus"/>
+/// enum for the editor's commodity-rows status column. Without this, WPF
+/// falls back to the enum's <c>ToString()</c> which yields PascalCase
+/// values like <c>"OutOfStock"</c> or <c>"VeryHigh"</c> that visibly
+/// overflow the dropdown chrome ("OutOfStoc"). The converter swaps in
+/// human-friendly two-word labels and returns <c>"—"</c> for the
+/// <c>Unknown</c> sentinel so the placeholder cell looks intentional
+/// instead of empty.
+/// </summary>
+public sealed class InventoryStatusToLabelConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var name = value?.ToString() ?? "";
+        return name switch
+        {
+            "OutOfStock" => "Out of stock",
+            "VeryLow"    => "Very low",
+            "Low"        => "Low",
+            "Medium"     => "Medium",
+            "High"       => "High",
+            "VeryHigh"   => "Very high",
+            "Maximum"    => "Maximum",
+            "Unknown"    => "—",
+            _            => name,
+        };
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Maps any non-null value to <see cref="Visibility.Visible"/>, null to
+/// <see cref="Visibility.Collapsed"/>. Useful for "show this card only when
+/// the bound object is non-null" without writing a custom converter per type.
+/// Honour `parameter="invert"` to flip the logic.
+/// </summary>
+public sealed class NullToVisibilityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var invert = string.Equals(parameter as string, "invert", StringComparison.OrdinalIgnoreCase);
+        var visible = value is not null;
+        if (invert) visible = !visible;
+        return visible ? Visibility.Visible : Visibility.Collapsed;
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)

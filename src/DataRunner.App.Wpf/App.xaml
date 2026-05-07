@@ -11,6 +11,21 @@
                 <ui:ControlsDictionary />
             </ResourceDictionary.MergedDictionaries>
 
+            <!-- ComboBox dropdown / host surfaces still bind to SystemColors on some templates;
+                 without these, popups stay white even when the rest of the app is dark. -->
+            <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#FF1C1C1C" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#FFF3F3F3" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.ControlTextBrushKey}" Color="#FFF3F3F3" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#FF0078D4" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#FFFFFFFF" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#FF2D2D2D" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.ControlLightBrushKey}" Color="#FF2D2D2D" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.ControlDarkBrushKey}" Color="#FF1C1C1C" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}"
+                             Color="#FF3F3F46" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}"
+                             Color="#FFF3F3F3" />
+
             <conv:NavTagToVisibilityConverter x:Key="NavTagToVisibility" />
             <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
             <conv:IntEqualsToVisibilityConverter x:Key="IntEqualsToVisibility" />
@@ -21,6 +36,7 @@
             <conv:DaysStaleToBrushConverter x:Key="DaysStaleToBrush" />
             <conv:InboxStatusToBrushConverter x:Key="InboxStatusToBrush" />
             <conv:InboxStatusToDotBrushConverter x:Key="InboxStatusToDot" />
+            <conv:InventoryStatusToLabelConverter x:Key="InventoryStatusToLabel" />
             <conv:ReferenceEqualsToBoolConverter x:Key="RefEqual" />
         </ResourceDictionary>
     </Application.Resources>

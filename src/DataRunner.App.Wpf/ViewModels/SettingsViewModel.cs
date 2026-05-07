@@ -87,6 +87,15 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _deleteScreenshotAfterSubmit = true;
     [ObservableProperty] private bool _defaultIsProduction;
 
+    /// <summary>
+    /// Delay in milliseconds between two consecutive POSTs of the same batch
+    /// send. Surfaces <see cref="IAppPreferences.BatchSubmissionDelayMs"/> in
+    /// the Settings view so the user can tune the throttle (1000 ms by
+    /// default — generous enough to never burst the UEX 1000-reports/30-min
+    /// rate cap on realistic batch sizes).
+    /// </summary>
+    [ObservableProperty] private int _batchSubmissionDelayMs = 1000;
+
     [ObservableProperty] private string _liveScreenshotsFolderStatus = "";
     [ObservableProperty] private bool _liveScreenshotsFolderHasError;
     [ObservableProperty] private string _ptuScreenshotsFolderStatus = "";
@@ -149,6 +158,18 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (_isHydrating) return;
         _prefs.DefaultIsProduction = value;
         _ = SavePrefsAsync("default-is-production");
+    }
+
+    partial void OnBatchSubmissionDelayMsChanged(int value)
+    {
+        if (_isHydrating) return;
+        // Defensive clamp: keep the value sane even if the user typed a
+        // negative number directly in the input. We never write back the
+        // clamped value to the property here (would cause a re-entry); we
+        // only forward the clamped value to the prefs file.
+        var clamped = Math.Max(0, value);
+        _prefs.BatchSubmissionDelayMs = clamped;
+        _ = SavePrefsAsync("batch-submission-delay-ms");
     }
 
     partial void OnLiveScreenshotsFolderChanged(string value)
@@ -276,6 +297,7 @@ public sealed partial class SettingsViewModel : ObservableObject
             AttachScreenshotOnSubmit = _prefs.AttachScreenshotOnSubmit;
             DeleteScreenshotAfterSubmit = _prefs.DeleteScreenshotAfterSubmit;
             DefaultIsProduction = _prefs.DefaultIsProduction;
+            BatchSubmissionDelayMs = _prefs.BatchSubmissionDelayMs;
             LiveScreenshotsFolder = _prefs.LiveScreenshotsFolder ?? DefaultScreenshotsFolder(GameBranch.Live);
             PtuScreenshotsFolder = _prefs.PtuScreenshotsFolder ?? DefaultScreenshotsFolder(GameBranch.Ptu);
             UpdateLiveStatus(LiveScreenshotsFolder);
@@ -401,6 +423,7 @@ public sealed partial class SettingsViewModel : ObservableObject
             AttachScreenshotOnSubmit = _prefs.AttachScreenshotOnSubmit;
             DeleteScreenshotAfterSubmit = _prefs.DeleteScreenshotAfterSubmit;
             DefaultIsProduction = _prefs.DefaultIsProduction;
+            BatchSubmissionDelayMs = _prefs.BatchSubmissionDelayMs;
 
             var freshLive = _prefs.LiveScreenshotsFolder ?? DefaultScreenshotsFolder(GameBranch.Live);
             if (!string.Equals(LiveScreenshotsFolder, freshLive, StringComparison.OrdinalIgnoreCase))

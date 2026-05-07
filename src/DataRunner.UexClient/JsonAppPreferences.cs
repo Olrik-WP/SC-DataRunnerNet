@@ -39,6 +39,7 @@ public sealed class JsonAppPreferences : IAppPreferences
     public bool SideBySideScreenshot { get; set; } = false;
     public int? RoutesSelectedVehicleId { get; set; }
     public double RoutesDatarunnerSliderValue { get; set; } = 30.0;
+    public int BatchSubmissionDelayMs { get; set; } = 1000;
 
     public JsonAppPreferences(string? overridePath = null)
     {
@@ -74,6 +75,10 @@ public sealed class JsonAppPreferences : IAppPreferences
             SideBySideScreenshot = dto.SideBySideScreenshot;
             RoutesSelectedVehicleId = dto.RoutesSelectedVehicleId;
             RoutesDatarunnerSliderValue = dto.RoutesDatarunnerSliderValue;
+            // Treat 0 in the persisted file as "explicit user override" rather
+            // than "missing", since 0 is a valid (no-throttle) value. Negative
+            // values would be nonsense; clamp to the default to be defensive.
+            BatchSubmissionDelayMs = dto.BatchSubmissionDelayMs >= 0 ? dto.BatchSubmissionDelayMs : 1000;
         }
         catch
         {
@@ -103,6 +108,7 @@ public sealed class JsonAppPreferences : IAppPreferences
                 SideBySideScreenshot = SideBySideScreenshot,
                 RoutesSelectedVehicleId = RoutesSelectedVehicleId,
                 RoutesDatarunnerSliderValue = RoutesDatarunnerSliderValue,
+                BatchSubmissionDelayMs = BatchSubmissionDelayMs,
             };
             var json = JsonSerializer.Serialize(dto, JsonOpts);
             await File.WriteAllTextAsync(_filePath, json, ct).ConfigureAwait(false);
@@ -159,5 +165,11 @@ public sealed class JsonAppPreferences : IAppPreferences
 
         /// <summary>Last Trader↔Datarunner slider position (0..100, default 30).</summary>
         public double RoutesDatarunnerSliderValue { get; set; } = 30.0;
+
+        /// <summary>
+        /// Throttle (ms) between two POSTs of the same batch send. Default
+        /// 1000 ms. 0 disables the throttle. See <see cref="IAppPreferences.BatchSubmissionDelayMs"/>.
+        /// </summary>
+        public int BatchSubmissionDelayMs { get; set; } = 1000;
     }
 }

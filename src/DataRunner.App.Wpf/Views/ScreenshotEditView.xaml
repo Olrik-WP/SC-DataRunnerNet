@@ -112,6 +112,52 @@
             <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
                 <StackPanel>
 
+                <!-- VALIDATED BANNER — visible only once the user has clicked
+                     "Validate & queue". Communicates the read-only lock and
+                     exposes the inverse "Edit again" command in the same
+                     visual area so it's never hard to find. The form fields
+                     below this banner are disabled via IsEnabled binding on
+                     the wrapper StackPanel so the user CANNOT silently mutate
+                     a Validated item — every edit must go through Edit again. -->
+                <Border Margin="0,0,0,12" Padding="14,10"
+                        CornerRadius="6"
+                        Background="#1F4CAF50" BorderBrush="#664CAF50" BorderThickness="1"
+                        Visibility="{Binding IsValidated, Converter={StaticResource BoolToVisibility}}">
+                    <DockPanel>
+                        <ui:Button DockPanel.Dock="Right"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"
+                                   Appearance="Secondary"
+                                   Padding="12,5"
+                                   Margin="12,0,0,0"
+                                   Command="{Binding EditAgainCommand}"
+                                   ToolTip="Removes the validated lock so you can edit this submission again. The item will leave the next batch send until you re-validate.">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Edit24" Margin="0,0,6,0" />
+                                <TextBlock Text="Edit again" />
+                            </StackPanel>
+                        </ui:Button>
+                        <TextBlock DockPanel.Dock="Left" Text="&#xE73E;"
+                                   FontFamily="Segoe MDL2 Assets" FontSize="18"
+                                   Foreground="#4CAF50" VerticalAlignment="Center"
+                                   Margin="0,0,12,0" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock FontWeight="SemiBold" FontSize="13"
+                                       Foreground="#A5D6A7"
+                                       Text="Validated &#x2014; ready for batch send" />
+                            <TextBlock FontSize="11" Opacity="0.85" TextWrapping="Wrap"
+                                       Text="Fields are locked. Click 'Send batch' in the inbox toolbar to ship every validated screenshot, or 'Edit again' to make changes." />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <!-- EDITABLE FORM WRAPPER — every actual input field lives below
+                     this StackPanel. We gate IsEnabled on CanEditFields so that
+                     once the user clicks "Validate & queue", the entire form
+                     becomes a read-only snapshot until they click "Edit again".
+                     The Validated banner above stays enabled (it owns the
+                     "Edit again" escape hatch). -->
+                <StackPanel IsEnabled="{Binding CanEditFields}">
+
                 <!-- MERGED-ITEM WARNING — visible only when this submission was built
                      from 2+ source screenshots. UEX accepts only ONE screenshot per
                      /data_submit POST, so only the first source image is attached.
@@ -130,10 +176,10 @@
                             <TextBlock FontWeight="SemiBold" FontSize="12">
                                 <Run Text="Merged from " />
                                 <Run Text="{Binding MergedSourceCount, Mode=OneWay}" />
-                                <Run Text=" screenshots — only the FIRST one is sent to UEX." />
+                                <Run Text=" screenshots &#x2014; only the FIRST one is sent to UEX." />
                             </TextBlock>
                             <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Opacity="0.85"
-                                       Text="UEX accepts a single screenshot per submission. While you're in your 90-day evaluation period as a new datarunner, the manual reviewer may reject the submission for commodity rows whose visual evidence isn't on the one attached screenshot. If that happens, submit each screenshot individually until UEX validates you." />
+                                       Text="UEX accepts a single screenshot per submission. While you're in your 90-day evaluation period as a new datarunner, the manual reviewer may reject the submission for commodity rows whose visual evidence isn't on the one attached screenshot. If that happens, submit each screenshot individually until UEX validates you. (Tip: the new Send batch flow does this automatically &#x2014; no need to merge.)" />
                         </StackPanel>
                     </DockPanel>
                 </Border>
@@ -333,7 +379,7 @@
 
                 <!-- ROWS -->
                 <ui:Card Margin="0,0,0,12" Padding="0">
-                    <StackPanel>
+                    <StackPanel ClipToBounds="True">
                         <DockPanel Margin="16,12,16,8">
                             <TextBlock Text="COMMODITY ROWS" Opacity="0.6" FontSize="11"
                                        FontWeight="SemiBold" VerticalAlignment="Center" />
@@ -349,6 +395,11 @@
                             </ui:Button>
                         </DockPanel>
 
+                        <!-- RowHeight bumped from 40 → 44 px so the editable ComboBox
+                             text presenter has enough vertical room for descenders
+                             (the 'p' in "Copper" was being clipped at 40 px because
+                             the WPF-UI ComboBox template centres the TextBox just
+                             low enough for descenders to fall outside the clip rect). -->
                         <DataGrid ItemsSource="{Binding Rows}"
                                   AutoGenerateColumns="False"
                                   HeadersVisibility="Column"
@@ -358,15 +409,116 @@
                                   CanUserDeleteRows="False"
                                   CanUserReorderColumns="False"
                                   CanUserResizeColumns="True"
-                                  RowHeight="40"
+                                  RowHeight="44"
                                   HorizontalScrollBarVisibility="Auto"
                                   Background="Transparent"
+                                  RowHeaderWidth="0"
+                                  HorizontalGridLinesBrush="Transparent"
+                                  VerticalGridLinesBrush="Transparent"
                                   Margin="0,0,4,0">
+                            <!-- ComboBox / TextBox defaults stay light-themed; tint selected cells
+                                 and force editors to use Fluent fills so row selection stays readable. -->
+                            <DataGrid.Resources>
+                                <!-- ComboBox default template ignores a simple Background setter on the root;
+                                     nest styles for the editable TextBox and dropdown items. -->
+                                <!-- Must inherit WPF-UI DefaultComboBoxStyle (implicit {x:Type ComboBox});
+                                     a stand-alone style without BasedOn replaces the template and falls back
+                                     to the stock Aero ComboBox (white drop-down + wrong ScrollViewer type). -->
+                                <Style x:Key="CommodityGridComboBox" TargetType="ComboBox"
+                                       BasedOn="{StaticResource {x:Type ComboBox}}">
+                                    <Setter Property="MaxDropDownHeight" Value="320" />
+                                    <Setter Property="ScrollViewer.HorizontalScrollBarVisibility"
+                                            Value="Disabled" />
+                                    <Setter Property="Background"
+                                            Value="{DynamicResource ComboBoxBackground}" />
+                                    <Setter Property="Foreground"
+                                            Value="{DynamicResource ComboBoxForeground}" />
+                                    <Setter Property="BorderBrush"
+                                            Value="{DynamicResource ControlElevationBorderBrush}" />
+                                    <Setter Property="ItemContainerStyle">
+                                        <Setter.Value>
+                                            <Style TargetType="ComboBoxItem"
+                                                   BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+                                                <Setter Property="HorizontalContentAlignment"
+                                                        Value="Stretch" />
+                                            </Style>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                                <!-- Tame the horizontal scroll track (often reads as a thin white line at
+                                     the bottom of the grid on dark backgrounds). -->
+                                <Style TargetType="ScrollBar">
+                                    <Setter Property="Background"
+                                            Value="Transparent" />
+                                </Style>
+                                <!-- Base cell chrome — derived column styles add IsSelected /
+                                     validation triggers on top. We zero out the default cell border
+                                     AND the focus visual so entering edit mode no longer paints the
+                                     blue 1 px rectangle that WPF's stock template draws around the
+                                     active cell. The cell's tint (validation red, selection grey)
+                                     stays the only visual cue. -->
+                                <Style x:Key="CommodityGridCellChrome" TargetType="DataGridCell"
+                                       BasedOn="{StaticResource {x:Type DataGridCell}}">
+                                    <Setter Property="BorderBrush" Value="Transparent" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                </Style>
+                                <Style x:Key="CommodityGridCellSelected" TargetType="DataGridCell"
+                                       BasedOn="{StaticResource CommodityGridCellChrome}">
+                                    <Style.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter Property="Background"
+                                                    Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                                <!-- Numeric editor (SCU / Price). Two cosmetic issues this style fixes:
+                                       1. The default WPF DataGrid edit TextBox draws a hard-coded blue
+                                          FocusVisual rectangle and a 1 px coloured border that look
+                                          noisy in our dark Fluent theme — both are killed via
+                                          FocusVisualStyle=null + a transparent BorderBrush so the cell
+                                          tint (validation red, selection grey) remains the only visual.
+                                       2. The TextBox in edit mode does NOT inherit the Right alignment
+                                          set on the TextBlock display style, so a freshly-clicked "0"
+                                          jumped from the right side of the cell to the left, reading
+                                          as a different value layout. TextAlignment="Right" + matching
+                                          padding/margin keep the digit anchored exactly where it was
+                                          in display mode. -->
+                                <Style x:Key="CommodityGridTextEdit" TargetType="TextBox">
+                                    <Setter Property="Background"
+                                            Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                    <Setter Property="Foreground"
+                                            Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                    <Setter Property="BorderBrush" Value="Transparent" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="CaretBrush"
+                                            Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                    <Setter Property="SelectionBrush"
+                                            Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                    <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                    <Setter Property="VerticalAlignment" Value="Center" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Right" />
+                                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                                    <Setter Property="TextAlignment" Value="Right" />
+                                    <Setter Property="Padding" Value="6,5,8,5" />
+                                </Style>
+                            </DataGrid.Resources>
                             <DataGrid.Columns>
-                                <DataGridTemplateColumn Header="Commodity" Width="2*" MinWidth="160">
+                                <!-- Commodity column: MinWidth bumped 160 → 200 so the longest
+                                     vanilla SC commodities ("Year of the Rat Egg", "Cuprum Cudgel",
+                                     etc.) fit without ellipsis in the typical editor layout. The
+                                     Name tooltip on the ComboBox stays as a fallback for any name
+                                     that still spills over when the editor is squeezed (split-view
+                                     screenshot pane open + side-by-side inbox). -->
+                                <DataGridTemplateColumn Header="Commodity" Width="2*" MinWidth="200">
+                                    <DataGridTemplateColumn.CellStyle>
+                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource CommodityGridCellSelected}" />
+                                    </DataGridTemplateColumn.CellStyle>
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
-                                            <ComboBox ItemsSource="{Binding DataContext.CommodityOptions, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            <ComboBox Style="{StaticResource CommodityGridComboBox}"
+                                                      ItemsSource="{Binding DataContext.CommodityOptions, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                       SelectedItem="{Binding Commodity, UpdateSourceTrigger=PropertyChanged}"
                                                       DisplayMemberPath="Name"
                                                       IsEditable="True"
@@ -374,26 +526,36 @@
                                                       IsTextSearchCaseSensitive="False"
                                                       TextSearch.TextPath="Name"
                                                       StaysOpenOnEdit="True"
-                                                      Margin="2" />
+                                                      VerticalContentAlignment="Center"
+                                                      Padding="8,5"
+                                                      Margin="2,3"
+                                                      ToolTip="{Binding Commodity.Name}" />
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
 
                                 <DataGridTextColumn Header="SCU" Width="90" MinWidth="70"
                                                     Binding="{Binding ScuValue, UpdateSourceTrigger=LostFocus, Converter={StaticResource SmartNumber}}">
+                                    <DataGridTextColumn.EditingElementStyle>
+                                        <Style TargetType="TextBox" BasedOn="{StaticResource CommodityGridTextEdit}" />
+                                    </DataGridTextColumn.EditingElementStyle>
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground"
+                                                    Value="{DynamicResource TextFillColorPrimaryBrush}" />
                                             <Setter Property="HorizontalAlignment" Value="Right" />
                                             <Setter Property="Margin" Value="0,0,8,0" />
                                             <Setter Property="VerticalAlignment" Value="Center" />
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
-                                    <!-- Cell-level style to colour the entire cell background when SCU is missing.
-                                         Using CellStyle (vs ElementStyle) so the highlight covers the whole cell,
-                                         not just the text inside. -->
                                     <DataGridTextColumn.CellStyle>
-                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource CommodityGridCellChrome}">
+                                            <!-- IsSelected first; validation last so error tint wins over selection. -->
                                             <Style.Triggers>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="Background"
+                                                            Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                                </Trigger>
                                                 <DataTrigger Binding="{Binding ScuIsEmpty}" Value="True">
                                                     <Setter Property="Background" Value="#33C8504F" />
                                                     <Setter Property="ToolTip" Value="SCU is required (or set the in-game status to 'Out of stock')." />
@@ -405,16 +567,25 @@
 
                                 <DataGridTextColumn Header="Price (aUEC/SCU)" Width="130" MinWidth="100"
                                                     Binding="{Binding PriceValue, UpdateSourceTrigger=LostFocus, Converter={StaticResource SmartNumber}}">
+                                    <DataGridTextColumn.EditingElementStyle>
+                                        <Style TargetType="TextBox" BasedOn="{StaticResource CommodityGridTextEdit}" />
+                                    </DataGridTextColumn.EditingElementStyle>
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground"
+                                                    Value="{DynamicResource TextFillColorPrimaryBrush}" />
                                             <Setter Property="HorizontalAlignment" Value="Right" />
                                             <Setter Property="Margin" Value="0,0,8,0" />
                                             <Setter Property="VerticalAlignment" Value="Center" />
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                     <DataGridTextColumn.CellStyle>
-                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource CommodityGridCellChrome}">
                                             <Style.Triggers>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="Background"
+                                                            Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                                </Trigger>
                                                 <DataTrigger Binding="{Binding PriceIsEmpty}" Value="True">
                                                     <Setter Property="Background" Value="#33C8504F" />
                                                     <Setter Property="ToolTip" Value="Price is required for this row." />
@@ -424,13 +595,20 @@
                                     </DataGridTextColumn.CellStyle>
                                 </DataGridTextColumn>
 
-                                <DataGridTemplateColumn Header="Status" Width="*" MinWidth="120">
+                                <!-- Status column: enum names like "OutOfStock" / "VeryHigh" used to
+                                     overflow the dropdown chrome ("OutOfStoc"). Bumping MinWidth to
+                                     fit the longest pretty-printed label and routing both the dropdown
+                                     items AND the selected-item display through the same converter
+                                     keeps single-word states ("Low") visually centred next to the chevron
+                                     while two-word states ("Very high", "Out of stock") still fit. -->
+                                <DataGridTemplateColumn Header="Status" Width="*" MinWidth="150">
                                     <DataGridTemplateColumn.CellStyle>
-                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource CommodityGridCellChrome}">
                                             <Style.Triggers>
-                                                <!-- Tint the cell orange when the inventory status was not detected
-                                                     by OCR. This is consistent with the orange Warning band in the
-                                                     validation footer ("inventory status is Unknown — pick one"). -->
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="Background"
+                                                            Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                                                </Trigger>
                                                 <DataTrigger Binding="{Binding StatusIsUnknown}" Value="True">
                                                     <Setter Property="Background" Value="#33DAA520" />
                                                     <Setter Property="ToolTip" Value="OCR did not detect this row's inventory status — pick one (Maximum / High / ...)." />
@@ -440,9 +618,22 @@
                                     </DataGridTemplateColumn.CellStyle>
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
-                                            <ComboBox ItemsSource="{Binding Source={StaticResource StatusValues}}"
+                                            <ComboBox Style="{StaticResource CommodityGridComboBox}"
+                                                      ItemsSource="{Binding Source={StaticResource StatusValues}}"
                                                       SelectedItem="{Binding Status, UpdateSourceTrigger=PropertyChanged}"
-                                                      Margin="2" />
+                                                      HorizontalContentAlignment="Center"
+                                                      VerticalContentAlignment="Center"
+                                                      Padding="6,5"
+                                                      Margin="2,3">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding Converter={StaticResource InventoryStatusToLabel}}"
+                                                                   HorizontalAlignment="Center"
+                                                                   TextAlignment="Center"
+                                                                   TextTrimming="None" />
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
@@ -452,6 +643,9 @@
                                      trustworthy. Foreground brush comes from MatchSeverity ("Ok"/"Warning"/"Error")
                                      piped through the existing SeverityToBrushConverter. -->
                                 <DataGridTemplateColumn Header="Match" Width="58" MinWidth="52" SortMemberPath="MatchScore">
+                                    <DataGridTemplateColumn.CellStyle>
+                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource CommodityGridCellSelected}" />
+                                    </DataGridTemplateColumn.CellStyle>
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <Border CornerRadius="3" Padding="6,2"
@@ -470,6 +664,9 @@
                                 </DataGridTemplateColumn>
 
                                 <DataGridTemplateColumn Width="48" MinWidth="44">
+                                    <DataGridTemplateColumn.CellStyle>
+                                        <Style TargetType="DataGridCell" BasedOn="{StaticResource CommodityGridCellSelected}" />
+                                    </DataGridTemplateColumn.CellStyle>
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <ui:Button Appearance="Transparent"
@@ -508,6 +705,7 @@
                     </StackPanel>
                 </ui:CardExpander>
 
+                </StackPanel>
                 </StackPanel>
             </ScrollViewer>
 
@@ -707,21 +905,51 @@
                     </CheckBox>
                 </Border>
 
-                <!-- The send action is the only thing in this row now: the
-                     production-mode toggle lives in Settings and applies to
-                     every screenshot to avoid forgetting to flip it back. -->
+                <!-- Two-button footer:
+                     PRIMARY  : "Validate & queue"  - persists drafts, locks
+                                fields, advances to the next non-validated
+                                item. The user then ships every queued item
+                                via the inbox toolbar's Send batch.
+                     SECONDARY: "Send now"          - one-shot path that goes
+                                straight to UEX (with the existing confirm
+                                dialog). Useful for retries / one-off sends
+                                without going through batch.
+                     The production-mode toggle lives in Settings and applies
+                     to every screenshot to avoid forgetting to flip it back. -->
                 <DockPanel>
-                    <ui:Button DockPanel.Dock="Right"
-                               HorizontalAlignment="Right"
-                               Appearance="Primary"
-                               Padding="22,10"
-                               Command="{Binding SubmitCommand}"
-                               ToolTip="{Binding ValidationSummary}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Send to UEX" FontWeight="SemiBold" />
-                            <ui:SymbolIcon Symbol="ArrowUpload24" Margin="8,0,0,0" />
-                        </StackPanel>
-                    </ui:Button>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <ui:Button Appearance="Secondary"
+                                   Padding="16,10"
+                                   Margin="0,0,8,0"
+                                   Command="{Binding SubmitCommand}"
+                                   ToolTip="Send this screenshot to UEX immediately, without going through the batch queue. The existing confirm dialog still appears.">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Send now" FontWeight="SemiBold" />
+                                <ui:SymbolIcon Symbol="ArrowUpload24" Margin="6,0,0,0" />
+                            </StackPanel>
+                        </ui:Button>
+                        <ui:Button Appearance="Primary"
+                                   Padding="22,10"
+                                   Command="{Binding ValidateCommand}"
+                                   ToolTip="{Binding ValidationSummary}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Validate &amp; queue" FontWeight="SemiBold" />
+                                <ui:SymbolIcon Symbol="Checkmark24" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </ui:Button>
+                    </StackPanel>
+
+                    <!-- Sending indicator (left side) — visible only while a
+                         Send-now POST is in flight. The form is locked via the
+                         IsEnabled wrapper above to avoid concurrent edits. -->
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                Visibility="{Binding IsSending, Converter={StaticResource BoolToVisibility}}">
+                        <ui:ProgressRing IsIndeterminate="True" Width="18" Height="18"
+                                         VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBlock Text="Sending..." FontSize="12" Opacity="0.85"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
                 </DockPanel>
             </StackPanel>
         </Border>

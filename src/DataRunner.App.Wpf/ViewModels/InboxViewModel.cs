@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using DataRunner.App.Services;
 using DataRunner.Core.Abstractions;
 using DataRunner.Core.Models;
 using Microsoft.Win32;
@@ -23,8 +24,9 @@ public sealed partial class InboxViewModel : ObservableObject
 
     /// <summary>
     /// Items currently multi-selected in the ListBox. The view binds this two-way
-    /// via a behavior so we can drive Merge / RemoveSelected commands without
-    /// relying on ListBox.SelectedItems (which is read-only on the binding side).
+    /// via a behavior so we can drive RemoveSelected on the full multi-selection
+    /// without relying on ListBox.SelectedItems (which is read-only on the
+    /// binding side).
     /// </summary>
     public ObservableCollection<InboxItem> SelectedItems { get; } = new();
 
@@ -46,19 +48,6 @@ public sealed partial class InboxViewModel : ObservableObject
     /// every time the selection changes.
     /// </summary>
     private InboxItem? _selectionListener;
-
-    /// <summary>
-    /// Drives both the visibility AND the IsEnabled state of the Merge button.
-    ///
-    /// IMPORTANT: <c>NotifyCanExecuteChangedFor</c> is REQUIRED for
-    /// <c>[RelayCommand(CanExecute = ...)]</c> to re-evaluate when this bool
-    /// flips. Without it, the toolkit only checks CanExecute on command
-    /// construction and never again — leading to the bug where the button
-    /// stays grayed even though the underlying property is true.
-    /// </summary>
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(MergeSelectedCommand))]
-    private bool _canMergeSelected;
 
     /// <summary>
     /// Set by App startup once the DI container is ready.
@@ -146,7 +135,21 @@ public sealed partial class InboxViewModel : ObservableObject
 
     private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        // Renumber first so the queue badges stay accurate, then refresh the
+        // batch counters since adding / removing an item changes how many are
+        // ready, validated, or failed.
         RenumberQueuePositions();
+        if (e.OldItems is not null)
+            foreach (InboxItem it in e.OldItems) it.PropertyChanged -= OnItemStatusChanged;
+        if (e.NewItems is not null)
+            foreach (InboxItem it in e.NewItems) it.PropertyChanged += OnItemStatusChanged;
+        RecomputeBatchCounters();
+    }
+
+    private void OnItemStatusChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(InboxItem.Status)) return;
+        RecomputeBatchCounters();
     }
 
     /// <summary>
@@ -162,15 +165,19 @@ public sealed partial class InboxViewModel : ObservableObject
 
     private void OnSelectedItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        // Merge requires AT LEAST 2 items, all of which must have a successful
-        // ParsedSubmission with a detected terminal. We don't gate on terminal
-        // matching here — the merge command itself reports a friendly error
-        // if the terminals differ.
-        var eligible = SelectedItems.Count(i =>
-            i.Submission is not null &&
-            i.Submission.IdTerminal is not null);
-        CanMergeSelected = eligible >= 2;
+        // Multi-selection drives the visibility of the bulk delete dropdown.
+        OnPropertyChanged(nameof(HasSelection));
+        OnPropertyChanged(nameof(SelectionCount));
+        RemoveSelectedCommand.NotifyCanExecuteChanged();
     }
+
+    /// <summary>True when at least one item is selected (1 or N). Used to show
+    /// the bulk delete button label / count in the toolbar.</summary>
+    public bool HasSelection => SelectedItems.Count > 0;
+
+    /// <summary>Convenience binding for the trash button label
+    /// ("Remove (3)" / "Remove" depending on selection size).</summary>
+    public int SelectionCount => SelectedItems.Count;
 
     partial void OnSelectedItemChanged(InboxItem? value)
     {
@@ -232,6 +239,10 @@ public sealed partial class InboxViewModel : ObservableObject
         }
 
         var editor = App.Resolve<ScreenshotEditViewModel>();
+        // Wire the auto-advance callback BEFORE Load so a Validate click on a
+        // pre-validated item that fires synchronously (defensive — should not
+        // happen) still finds the right inbox VM hook to navigate from.
+        editor.OnValidatedRequestNext = SelectNextNonValidatedAfter;
         editor.Load(item);
         CurrentEditor = editor;
     }
@@ -318,130 +329,340 @@ public sealed partial class InboxViewModel : ObservableObject
         // with their own status. Just nothing to do here.
     }
 
-    [RelayCommand]
+    /// <summary>
+    /// Removes EVERY currently multi-selected item. Falls back to the single
+    /// <see cref="SelectedItem"/> when the multi-selection collection is
+    /// empty (single-click case).
+    ///
+    /// Bug fix vs. the previous implementation: we used to drop only
+    /// <see cref="SelectedItem"/>, which meant marquee-selecting 5 items and
+    /// hitting Delete only removed 1. Now we iterate on <see cref="SelectedItems"/>.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRemoveSelected))]
     private void RemoveSelected()
     {
-        if (SelectedItem is null) return;
-        var toRemove = SelectedItem;
-        // Reset selection BEFORE removing so the editor is dropped immediately
-        // (the ListBox will also reset its own SelectedItem after removal but
-        // we want to be defensive here against any binding-update race).
+        // Snapshot the multi-selection list to avoid mutating it while we
+        // iterate — Items.Remove cascades into SelectedItems removal.
+        var targets = SelectedItems.Count > 0
+            ? SelectedItems.ToList()
+            : (SelectedItem is null ? new List<InboxItem>() : new List<InboxItem> { SelectedItem });
+        if (targets.Count == 0) return;
+
         SelectedItem = null;
         CurrentEditor = null;
-        Items.Remove(toRemove);
+        SelectedItems.Clear();
+
+        foreach (var t in targets)
+            Items.Remove(t);
     }
 
+    private bool CanRemoveSelected() => SelectedItems.Count > 0 || SelectedItem is not null;
+
     /// <summary>
-    /// Merges 2+ selected screenshots of the SAME terminal into a single
-    /// consolidated InboxItem. Commodity rows are deduplicated by id_commodity
-    /// (later submissions override earlier ones for the same commodity, so the
-    /// most recent screenshot wins).
-    ///
-    /// The source items are kept in the inbox (status set to <see cref="InboxStatus.Sent"/>
-    /// is NOT applied — they keep their original state) so the user can split
-    /// the merge later if needed. The merged item replaces the selection.
+    /// Bulk-remove every item whose status is <see cref="InboxStatus.Sent"/>.
+    /// Used by the trash button's dropdown menu after a batch send to clean
+    /// up the inbox in one click instead of clicking each card. No confirm
+    /// dialog — Sent items are terminal and the screenshot files were already
+    /// deleted (or kept on disk on test sends) by the submission flow itself.
     /// </summary>
-    [RelayCommand(CanExecute = nameof(CanMergeSelected))]
-    private void MergeSelected()
+    [RelayCommand]
+    private void RemoveAllSent() => RemoveItemsWhere(i => i.Status == InboxStatus.Sent);
+
+    /// <summary>Bulk-remove every <see cref="InboxStatus.Failed"/> item. Same
+    /// rationale as <see cref="RemoveAllSent"/>.</summary>
+    [RelayCommand]
+    private void RemoveAllFailed() => RemoveItemsWhere(i => i.Status == InboxStatus.Failed);
+
+    /// <summary>
+    /// Drops EVERY item from the inbox. Confirmed via <see cref="IDialogService"/>
+    /// so the user doesn't lose unsent work to a stray click. Items with status
+    /// <see cref="InboxStatus.Pending"/> / <see cref="InboxStatus.Processing"/>
+    /// are kept (we don't want to abort an OCR run mid-flight by yanking the
+    /// item out from under it).
+    /// </summary>
+    [RelayCommand]
+    private void RemoveAll()
     {
-        var sources = SelectedItems
-            .Where(i => i.Submission is not null && i.Submission.IdTerminal is not null)
-            .OrderBy(i => i.AddedAt)
-            .ToList();
-
-        if (sources.Count < 2) return;
-
-        // Group by detected terminal id. We allow merging only if all items
-        // share the same terminal — otherwise the user is mixing two real
-        // visits and probably doesn't want them collapsed into one submission.
-        var distinctTerminals = sources
-            .Select(s => s.Submission!.IdTerminal!.Value)
-            .Distinct()
-            .ToList();
-
-        if (distinctTerminals.Count > 1)
+        var dialog = App.Resolve<IDialogService>();
+        var deletable = Items.Where(IsDeletableInBulk).ToList();
+        if (deletable.Count == 0)
         {
-            App.Resolve<Services.IDialogService>().ShowError(
-                "Cannot merge — different terminals",
-                $"The selected screenshots reference {distinctTerminals.Count} different terminals. " +
-                "Only screenshots of the SAME terminal can be merged into one submission.");
+            dialog.ShowInfo("Nothing to remove",
+                "No removable items in the inbox (items currently being processed by OCR are kept).");
             return;
         }
 
-        // Deduplicate rows: later screenshots win over earlier ones for the
-        // same commodity. This matches user intent — they re-screened to
-        // refresh data, the latest values are the truth.
-        var mergedRows = new Dictionary<int, ParsedPriceRow>();
-        foreach (var src in sources)
+        var confirm = System.Windows.MessageBox.Show(
+            $"Remove {deletable.Count} item(s) from the inbox?\n\n" +
+            "Items currently being processed by OCR are kept; sent items keep their History entry.",
+            "Remove all",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Question,
+            System.Windows.MessageBoxResult.No);
+        if (confirm != System.Windows.MessageBoxResult.Yes) return;
+
+        RemoveItemsWhere(IsDeletableInBulk);
+    }
+
+    private static bool IsDeletableInBulk(InboxItem item)
+        => item.Status is not (InboxStatus.Pending or InboxStatus.Processing or InboxStatus.Sending);
+
+    private void RemoveItemsWhere(Func<InboxItem, bool> predicate)
+    {
+        var snapshot = Items.Where(predicate).ToList();
+        if (snapshot.Count == 0) return;
+
+        // Drop the editor binding if its bound item is being removed so we
+        // don't leave a stale view-model referencing a deleted card.
+        if (SelectedItem is not null && predicate(SelectedItem))
         {
-            foreach (var row in src.Submission!.Prices)
-            {
-                if (row.IdCommodity is null) continue;
-                mergedRows[row.IdCommodity.Value] = row;
-            }
+            SelectedItem = null;
+            CurrentEditor = null;
         }
 
-        var first = sources[0];
-
-        // All merged items share the same terminal, but technically each source
-        // could come from a different watcher slot (LIVE vs PTU). We intersect:
-        // if every source carries the same branch, keep it; if they differ
-        // (rare — a user merging cross-channel screenshots is almost certainly
-        // a mistake), fall back to LIVE since UEX defaults the missing
-        // game_version field to the current LIVE build.
-        var distinctBranches = sources
-            .Select(s => s.Submission!.Branch)
-            .Distinct()
-            .ToList();
-        var mergedBranch = distinctBranches.Count == 1
-            ? distinctBranches[0]
-            : DataRunner.Core.Models.GameBranch.Live;
-
-        var mergedSubmission = new ParsedSubmission
-        {
-            SourceImage = first.Submission!.SourceImage,
-            Type = first.Submission.Type,
-            IsProduction = first.Submission.IsProduction,
-            Tab = first.Submission.Tab,
-            Branch = mergedBranch,
-            IdTerminal = first.Submission.IdTerminal,
-            TerminalDisplayName = first.Submission.TerminalDisplayName,
-            TerminalMatchScore = first.Submission.TerminalMatchScore,
-            TerminalMatchedFromOcr = first.Submission.TerminalMatchedFromOcr,
-            TerminalMatchedField = first.Submission.TerminalMatchedField,
-            ContainerSizes = first.Submission.ContainerSizes,
-            Prices = mergedRows.Values.ToList(),
-            NeedsReview = sources.SelectMany(s => s.Submission!.NeedsReview).Distinct().ToList(),
-            Notes = $"Merged from {sources.Count} screenshots ({string.Join(", ", sources.Select(s => Path.GetFileName(s.ImagePath)))})",
-        };
-
-        // Resolve the rich label (Name · System) for the merged item so the inbox
-        // card shows the disambiguated terminal, not just the bare name.
-        var mergedTerminal = first.Submission.IdTerminal is { } tid
-            ? App.Resolve<DataRunner.Core.Abstractions.ICatalogProvider>().GetTerminal(tid)
-            : null;
-        var mergedRichLabel = mergedTerminal?.RichDisplayName ?? first.Submission.TerminalDisplayName;
-
-        var mergedItem = new InboxItem
-        {
-            ImagePath = first.ImagePath, // Primary screenshot for preview / attachment
-            DisplayName = $"[Merged x{sources.Count}] {mergedRichLabel}",
-            Status = InboxStatus.Review,
-            StatusReason = $"Merged {mergedRows.Count} commodities from {sources.Count} screenshots",
-            AddedAt = DateTimeOffset.Now,
-            TerminalLabel = mergedRichLabel,
-            RowCount = mergedRows.Count,
-            Branch = mergedBranch,
-            Submission = mergedSubmission,
-            // Track ALL sources so the post-send cleanup can delete every file
-            // and the rescan filter can skip every basename. Without this the
-            // 2 stragglers from the merge would be re-OCRed at the next scan.
-            SourcePaths = sources.Select(s => s.ImagePath).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-        };
-
-        Items.Add(mergedItem);
         SelectedItems.Clear();
-        SelectedItem = mergedItem;
+        foreach (var t in snapshot)
+            Items.Remove(t);
+    }
+
+    // ---- Batch send state ----
+    // The actual smart-split + sequential POST loop lives in IBatchPlanner +
+    // IBatchSubmitter (Services/). The inbox view-model only owns the wiring
+    // between the user clicks and those services, plus the inbox-side state
+    // (counters, in-flight flag, cancellation source).
+
+    /// <summary>
+    /// Set by App startup to wire the Send batch button to <see cref="IBatchSubmitter"/>.
+    /// We use a callback rather than constructor injection so this view-model
+    /// can stay a singleton without pulling the entire submission stack into
+    /// the early app startup graph (the planner / submitter resolve ICatalogProvider,
+    /// IUexApiClient and friends — heavy).
+    /// </summary>
+    private Func<IReadOnlyList<InboxItem>, CancellationToken, Task>? _onSendBatchRequested;
+    public Func<IReadOnlyList<InboxItem>, CancellationToken, Task>? OnSendBatchRequested
+    {
+        get => _onSendBatchRequested;
+        set
+        {
+            _onSendBatchRequested = value;
+            // Wiring landed late — re-evaluate the batch commands so the
+            // toolbar buttons enable themselves on next user interaction
+            // instead of waiting for the next status change to nudge them.
+            SendBatchCommand.NotifyCanExecuteChanged();
+            RetryFailedCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>
+    /// Cancellation source for the current batch run. Owned solely by the
+    /// inbox view-model; <see cref="StopBatch"/> cancels it and
+    /// <see cref="EndBatch"/> resets it. Null when no batch is running.
+    /// </summary>
+    private CancellationTokenSource? _batchCts;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBatchIdle))]
+    [NotifyCanExecuteChangedFor(nameof(SendBatchCommand))]
+    [NotifyCanExecuteChangedFor(nameof(StopBatchCommand))]
+    private bool _isBatchInProgress;
+
+    public bool IsBatchIdle => !IsBatchInProgress;
+
+    /// <summary>Number of items currently flagged Validated and ready for the
+    /// next batch send. Bound by the toolbar as the "X" of "X / Y ready".</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BatchSummary))]
+    [NotifyCanExecuteChangedFor(nameof(SendBatchCommand))]
+    private int _validatedCount;
+
+    /// <summary>Number of items still expected to land in the next batch
+    /// (everything that is not Sent / Failed and not currently OCR-processing).
+    /// Forms the denominator of the toolbar "X / Y ready" label.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BatchSummary))]
+    [NotifyCanExecuteChangedFor(nameof(SendBatchCommand))]
+    private int _pendingCount;
+
+    /// <summary>Number of items in the Failed state — drives the visibility of
+    /// the Retry failed button.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFailedItems))]
+    [NotifyCanExecuteChangedFor(nameof(RetryFailedCommand))]
+    private int _failedCount;
+
+    public bool HasFailedItems => FailedCount > 0;
+
+    /// <summary>Human-readable "X / Y ready" label for the Send batch button.</summary>
+    public string BatchSummary => $"{ValidatedCount} / {ValidatedCount + PendingCount} ready";
+
+    private void RecomputeBatchCounters()
+    {
+        var validated = 0;
+        var pending = 0;
+        var failed = 0;
+        foreach (var i in Items)
+        {
+            switch (i.Status)
+            {
+                case InboxStatus.Validated: validated++; break;
+                case InboxStatus.Failed: failed++; break;
+                case InboxStatus.Sent: break;
+                // Anything else (Pending / Processing / Ready / Review / Sending)
+                // counts toward "still expected". We deliberately DO include
+                // Sending here so the denominator stays stable while a batch
+                // is mid-flight (counters tick down only as items land).
+                default: pending++; break;
+            }
+        }
+        ValidatedCount = validated;
+        PendingCount = pending;
+        FailedCount = failed;
+    }
+
+    /// <summary>
+    /// Send batch is enabled iff:
+    ///   - the wiring is present (App.OnStartup ran);
+    ///   - no batch is already in flight;
+    ///   - at least one item is Validated;
+    ///   - every NON-terminal item is Validated (i.e. nothing is in Ready /
+    ///     Review / Pending / Processing / Sending). This enforces the rule
+    ///     "the user must validate every screenshot before shipping the
+    ///     batch" specified in the smart-split plan.
+    /// </summary>
+    private bool CanSendBatch()
+        => OnSendBatchRequested is not null
+           && !IsBatchInProgress
+           && ValidatedCount > 0
+           && PendingCount == 0;
+
+    /// <summary>
+    /// Triggers the smart-split + sequential POST flow for every Validated
+    /// item. The actual planning + dialog + POSTs are owned by
+    /// <see cref="IBatchPlanner"/> + <see cref="IBatchSubmitter"/>; this
+    /// command just snapshots the eligible items and delegates.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanSendBatch))]
+    private async Task SendBatchAsync()
+    {
+        if (OnSendBatchRequested is null) return;
+
+        var validated = Items.Where(i => i.Status == InboxStatus.Validated).ToList();
+        if (validated.Count == 0) return;
+
+        BeginBatch();
+        try
+        {
+            await OnSendBatchRequested(validated, _batchCts!.Token).ConfigureAwait(true);
+        }
+        finally
+        {
+            EndBatch();
+        }
+    }
+
+    /// <summary>Re-arms a Send batch run on the current Failed items only.
+    /// Useful after a batch where some items hit a transient HTTP 500 that
+    /// the auto-retry couldn't ride out — the user fixes connectivity and
+    /// hits this once.</summary>
+    [RelayCommand(CanExecute = nameof(CanRetryFailed))]
+    private async Task RetryFailedAsync()
+    {
+        if (OnSendBatchRequested is null) return;
+
+        // Move every Failed item back to Validated so the planner picks them
+        // up. Their drafts are intact (we never wipe them on Failed) so the
+        // payloads will be the same as the failed attempt.
+        var failed = Items.Where(i => i.Status == InboxStatus.Failed).ToList();
+        if (failed.Count == 0) return;
+        foreach (var f in failed)
+        {
+            f.Status = InboxStatus.Validated;
+            f.StatusReason = "Re-queued for retry.";
+        }
+
+        BeginBatch();
+        try
+        {
+            await OnSendBatchRequested(failed, _batchCts!.Token).ConfigureAwait(true);
+        }
+        finally
+        {
+            EndBatch();
+        }
+    }
+
+    private bool CanRetryFailed()
+        => OnSendBatchRequested is not null
+           && !IsBatchInProgress
+           && FailedCount > 0;
+
+    /// <summary>
+    /// Cancels the in-flight batch. The submitter finishes the current POST
+    /// (we never abort a request mid-flight to keep the UEX server-side
+    /// state coherent with our local history) and skips every subsequent
+    /// item. The skipped items remain in <see cref="InboxStatus.Validated"/>
+    /// so the user can hit Send batch again later.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanStopBatch))]
+    private void StopBatch()
+    {
+        if (_batchCts is not null && !_batchCts.IsCancellationRequested)
+            _batchCts.Cancel();
+    }
+
+    private bool CanStopBatch() => IsBatchInProgress;
+
+    private void BeginBatch()
+    {
+        _batchCts?.Dispose();
+        _batchCts = new CancellationTokenSource();
+        IsBatchInProgress = true;
+    }
+
+    private void EndBatch()
+    {
+        _batchCts?.Dispose();
+        _batchCts = null;
+        IsBatchInProgress = false;
+        RecomputeBatchCounters();
+    }
+
+    /// <summary>
+    /// Called by the editor right after a successful Validate click so the
+    /// inbox can advance to the next non-validated item without the user
+    /// having to manually click each one. Picks the next item by ascending
+    /// <see cref="InboxItem.QueuePosition"/>; wraps at the end (and skips
+    /// items in terminal / processing states).
+    ///
+    /// Behaviour decision: when nothing else needs validating, we DO NOT
+    /// move the selection — the user stays on the current (now Validated)
+    /// item with the green banner showing, ready to either edit again or
+    /// click Send batch in the toolbar.
+    /// </summary>
+    public void SelectNextNonValidatedAfter(InboxItem current)
+    {
+        if (current is null) return;
+        var startIndex = Items.IndexOf(current);
+        if (startIndex < 0) return;
+
+        // Walk forward then wrap. We use a single iteration over Items.Count
+        // entries to guarantee termination even if the current item is the
+        // last one (or the only one).
+        for (var step = 1; step <= Items.Count; step++)
+        {
+            var idx = (startIndex + step) % Items.Count;
+            var candidate = Items[idx];
+            if (ReferenceEquals(candidate, current)) continue;
+            if (candidate.Status is InboxStatus.Ready or InboxStatus.Review)
+            {
+                SelectedItem = candidate;
+                SelectedItems.Clear();
+                SelectedItems.Add(candidate);
+                return;
+            }
+        }
+        // Nothing left to validate → keep the current selection (the user
+        // sees the validated banner with the option to Edit again or send).
     }
 }
 
@@ -456,7 +677,33 @@ public sealed partial class InboxItem : ObservableObject
 
     [ObservableProperty] private string _imagePath = "";
     [ObservableProperty] private string _displayName = "";
-    [ObservableProperty] private InboxStatus _status = InboxStatus.Pending;
+
+    /// <summary>
+    /// Lifecycle state of the item in the inbox queue. Drives the card's
+    /// status badge color, the editor's auto-open behaviour, and the batch
+    /// planner's eligibility check (only <see cref="InboxStatus.Validated"/>
+    /// items are picked up by Send batch).
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsValidated))]
+    [NotifyPropertyChangedFor(nameof(IsSending))]
+    [NotifyPropertyChangedFor(nameof(IsTerminal))]
+    private InboxStatus _status = InboxStatus.Pending;
+
+    /// <summary>True iff the user has explicitly clicked Validate on this item.
+    /// Bound by the inbox card's "validated" check icon. Mirror of
+    /// <see cref="Status"/>=<see cref="InboxStatus.Validated"/>.</summary>
+    public bool IsValidated => Status == InboxStatus.Validated;
+
+    /// <summary>True iff the item is currently being POSTed to UEX. Drives a
+    /// per-card spinner / "Sending..." label during a batch run.</summary>
+    public bool IsSending => Status == InboxStatus.Sending;
+
+    /// <summary>Terminal states (Sent / Failed) — bound to slightly stronger
+    /// card tints so the user sees at a glance which items have been
+    /// processed vs. which are still in the queue.</summary>
+    public bool IsTerminal => Status is InboxStatus.Sent or InboxStatus.Failed;
+
     [ObservableProperty] private DateTimeOffset _addedAt;
     [ObservableProperty] private string? _terminalLabel;
     [ObservableProperty] private int _rowCount;
@@ -638,6 +885,21 @@ public enum InboxStatus
     Processing,
     Ready,
     Review,
+    /// <summary>
+    /// User has explicitly confirmed the OCR result and locked the editor.
+    /// The item is queued for the next batch send. Set ONLY by an explicit
+    /// click on Validate; auto-cleared back to <see cref="Ready"/> /
+    /// <see cref="Review"/> as soon as any field changes (defence in depth
+    /// against silent edits between Validate and Send batch).
+    /// </summary>
+    Validated,
+    /// <summary>
+    /// Currently being POSTed to UEX as part of an in-flight batch (or a
+    /// "Send now" unitary submission). Transient: cleared to
+    /// <see cref="Sent"/> or <see cref="Failed"/> as soon as the call
+    /// returns.
+    /// </summary>
+    Sending,
     Sent,
     Failed,
 }
