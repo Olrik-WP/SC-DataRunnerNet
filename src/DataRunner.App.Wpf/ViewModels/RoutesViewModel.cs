@@ -561,9 +561,59 @@ public sealed partial class RoutesViewModel : ObservableObject
         foreach (var p in _provider.Proposals) AllProposals.Add(p);
         TotalCount = AllProposals.Count;
         LastRefreshedAt = _provider.LastRefreshedAt;
+        // Vehicle cap on top of provider's budget cap. The provider only knows
+        // about the investment cap (UEX query), so the SCU column would
+        // otherwise show e.g. 2,116 SCU even on a 696-SCU C2 — re-cap here so
+        // the visible quantity is always a value the selected ship can lift.
+        ApplyVehicleCapToProposals();
         RecomputeAllScores();
         View.Refresh();
         UpdateFilteredCount();
+    }
+
+    /// <summary>
+    /// Re-applies the budget + vehicle SCU cap to every cached proposal. Mirrors
+    /// the formula in <c>TradeRouteProvider.ApplyBudgetProjection</c> and adds the
+    /// selected vehicle's cargo capacity as a third <c>min()</c> term so SCU,
+    /// Invested, Profit and ETA-derived metrics all reflect what the user can
+    /// actually fly out of the origin in one trip. Idempotent — recomputes from
+    /// <see cref="UexCommodityRoute.ScuOrigin"/> + prices each call so toggling
+    /// the vehicle off restores the budget-only projection.
+    /// </summary>
+    private void ApplyVehicleCapToProposals()
+    {
+        int? vehicleCapScu = SelectedVehicle is { Scu: > 0 } v
+            ? (int)Math.Floor(v.Scu)
+            : null;
+        long? investmentCap = InvestmentMaxUec is { } i && i > 0 ? i : null;
+
+        foreach (var p in AllProposals)
+        {
+            var maxScu = (int)Math.Floor(p.Route.ScuOrigin);
+            if (maxScu <= 0)
+            {
+                p.EffectiveScu = 0;
+                p.EffectiveInvestment = 0;
+                p.EffectiveProfit = 0;
+                continue;
+            }
+
+            int eff = maxScu;
+            if (investmentCap is { } cap && p.Route.PriceOrigin > 0)
+            {
+                eff = Math.Min(eff, (int)Math.Floor(cap / p.Route.PriceOrigin));
+            }
+            if (vehicleCapScu is { } vs)
+            {
+                eff = Math.Min(eff, vs);
+            }
+            if (eff < 0) eff = 0;
+
+            var marginPerScu = p.Route.PriceDestination - p.Route.PriceOrigin;
+            p.EffectiveScu = eff;
+            p.EffectiveInvestment = eff * p.Route.PriceOrigin;
+            p.EffectiveProfit = eff * marginPerScu;
+        }
     }
 
     /// <summary>
@@ -834,7 +884,12 @@ public sealed partial class RoutesViewModel : ObservableObject
 
     partial void OnSelectedVehicleChanged(UexVehicle? value)
     {
-        // Vehicle change only affects client-side filtering (no API call).
+        // Vehicle change is purely client-side: recap SCU/profit by the new
+        // ship's capacity, then re-rank (profit-weighted score depends on the
+        // capped EffectiveProfit) and re-filter (incompatible container sets
+        // are still hidden by FilterPredicate).
+        ApplyVehicleCapToProposals();
+        RecomputeAllScores();
         View.Refresh();
         UpdateFilteredCount();
         PersistRoutesPreferences();

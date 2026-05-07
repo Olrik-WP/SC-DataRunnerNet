@@ -557,7 +557,7 @@
                     <DataGridTextColumn Width="80"
                                         SortMemberPath="EffectiveScu"
                                         Binding="{Binding EffectiveScu, StringFormat='{}{0:N0}'}"
-                                        ToolTipService.ToolTip="Maximum SCU buyable from the listed origin within the current investment cap. With no cap this equals the full origin stock.">
+                                        ToolTipService.ToolTip="Maximum SCU you can actually load on this trip = min(origin stock, investment ÷ buy price, selected vehicle SCU). Pick a different ship or raise the investment cap to grow this value; clear the vehicle filter to see the full origin stock.">
                         <DataGridTextColumn.Header>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="SCU" />
