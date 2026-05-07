@@ -716,19 +716,30 @@ public sealed class CommodityParser
     /// <summary>
     /// Heuristic gate that decides whether a raw OCR line is a plausible
     /// commodity-name candidate before we hand it to the fuzzy matcher.
-    /// We accept three rendering styles seen across SC themes:
-    ///  • <b>UPPERCASE</b> — Stanton stations use this exclusively
+    /// We accept four rendering styles seen across SC themes plus OCR
+    /// noise:
+    ///  • <b>STYLE 1 — UPPERCASE</b>: Stanton stations
     ///    (<c>"LARANITE"</c>, <c>"MEDICAL SUPPLIES"</c>).
-    ///  • <b>Title Case</b> — Pyro stations render names with only the
-    ///    first letter of each word capitalised (<c>"Agricium"</c>,
-    ///    <c>"Medical Supplies"</c>, <c>"Altruciatoxin"</c>). The previous
-    ///    "≥60% uppercase" rule rejected these outright, which is why
-    ///    Pyro screenshots produced rows=0 even though the OCR text was
-    ///    perfectly readable.
-    ///  • <b>Mixed-case fragments from OCR noise</b> — only when the FIRST
-    ///    letter of every word is uppercase. Anything looking like a
-    ///    sentence/log line (eg. <c>"Welcome to the trading post"</c>)
-    ///    fails the per-word capitalisation test.
+    ///  • <b>STYLE 2 — per-word Title Case</b>: Pyro stations
+    ///    (<c>"Agricium"</c>, <c>"Medical Supplies"</c>,
+    ///    <c>"Altruciatoxin"</c>). The previous "≥60% uppercase" rule
+    ///    rejected these outright; STYLE 2 was added on 2026-05-07 to
+    ///    fix Pyro <c>rows=0</c>.
+    ///  • <b>STYLE 3 — corrupted CamelCase fragment</b>: catches OCR
+    ///    failures specific to dim Pyro text where the leading letter
+    ///    AND the inter-word space were both lost. Real-world example:
+    ///    <c>"Pressurized Ice"</c> → <c>"ressurizedIce"</c>. This
+    ///    fragment fails STYLE 1 (1/13 uppercase = 8 %) and STYLE 2
+    ///    (first letter lowercase) but the fuzzy matcher would happily
+    ///    score it ≥ 95 % against <c>"PRESSURIZED ICE"</c> if only it
+    ///    got the chance — so we let any "mostly letters with at least
+    ///    one capital" string through and rely on the matcher's strict
+    ///    score threshold (75 %) plus its length-ratio penalty to reject
+    ///    real garbage.
+    ///
+    /// Anything that looks like a sentence / log line / metric readout
+    /// (lots of digits, no upper-case letters, &lt;5 letters) is still
+    /// rejected up front to keep the matcher load bounded.
     /// </summary>
     private static bool LooksLikeNameCandidate(string line)
     {
@@ -747,18 +758,36 @@ public sealed class CommodityParser
         // PaddleOCR sometimes prepends to a name) by skipping any word
         // whose first letter isn't… a letter at all.
         var words = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length == 0) return false;
-        var titleWords = 0;
-        var lettered = 0;
-        foreach (var w in words)
+        if (words.Length > 0)
         {
-            var firstLetter = w.FirstOrDefault(char.IsLetter);
-            if (firstLetter == default) continue;
-            lettered++;
-            if (char.IsUpper(firstLetter)) titleWords++;
+            var titleWords = 0;
+            var lettered = 0;
+            foreach (var w in words)
+            {
+                var firstLetter = w.FirstOrDefault(char.IsLetter);
+                if (firstLetter == default) continue;
+                lettered++;
+                if (char.IsUpper(firstLetter)) titleWords++;
+            }
+            if (lettered > 0 && titleWords == lettered) return true;
         }
-        // At least one lettered word AND every lettered word starts uppercase.
-        return lettered > 0 && titleWords == lettered;
+
+        // STYLE 3: dim-Pyro CamelCase fragment ("ressurizedIce"). We
+        // demand:
+        //   - ≥ 5 letters (rules out short numeric/UI tokens like
+        //     "FPS", "1 2 4")
+        //   - ≥ 1 uppercase letter (a real Pyro commodity always has
+        //     at least its internal-word capital intact even when the
+        //     leading P/A/M was eaten by the dim rendering)
+        //   - ≥ 80 % of the line's non-space chars are letters
+        //     (rejects metric readouts like "Quality 0",
+        //     "FPS 34 GPU 38%", "192 SCU")
+        // The matcher's strict 75 % score + length-ratio penalty
+        // catches any garbage that slips through.
+        if (letters < 5 || upper < 1) return false;
+        var nonSpace = line.Count(c => !char.IsWhiteSpace(c));
+        if (nonSpace == 0) return false;
+        return (double)letters / nonSpace >= 0.8;
     }
 
     private static bool IsUiLabel(string line)

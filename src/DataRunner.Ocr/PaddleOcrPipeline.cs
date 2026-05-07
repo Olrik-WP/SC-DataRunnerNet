@@ -167,23 +167,37 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
                     src, ocrResult.Regions, rightPanelStartX, scaleFactor);
                 detectedActiveTab = tabDiagnostic.Tab;
 
-                // Log the actual saturation samples even on success — makes
-                // it trivial to triage future "Unknown" cases against past
-                // working captures (eg. the 2026-05-05 Pyro Gateway incident
-                // where the gap fell silently below the decision margin).
+                // Log the FULL measurement vector — saturation, value, AND
+                // bright-pixel ratio — on every capture (success or
+                // failure). This makes it trivial to:
+                //  • Triage future "Unknown" cases against past working
+                //    captures (eg. the 2026-05-05 Pyro Gateway incident
+                //    where the gap fell silently below the decision
+                //    margin).
+                //  • Re-calibrate palette-specific thresholds against
+                //    fresh user logs without needing a debug build.
                 var buySatLog = tabDiagnostic.BuySaturation?.ToString("F1") ?? "n/a";
                 var sellSatLog = tabDiagnostic.SellSaturation?.ToString("F1") ?? "n/a";
+                var buyValLog = tabDiagnostic.BuyValue?.ToString("F1") ?? "n/a";
+                var sellValLog = tabDiagnostic.SellValue?.ToString("F1") ?? "n/a";
+                var buyRatioLog = tabDiagnostic.BuyBrightRatio?.ToString("F2") ?? "n/a";
+                var sellRatioLog = tabDiagnostic.SellBrightRatio?.ToString("F2") ?? "n/a";
                 if (tabDiagnostic.Tab == TerminalTab.Unknown)
                 {
-                    _logger.LogInformation(
-                        "Active-tab detection: Unknown — buySat={BuySat} sellSat={SellSat} palette={Palette} scale={Scale:F2} reason={Reason}",
-                        buySatLog, sellSatLog, tabDiagnostic.Palette, scaleFactor, tabDiagnostic.UnknownReason ?? "(none)");
+                    _logger.LogWarning(
+                        "Active-tab detection: Unknown — buyS/V/r={BuySat}/{BuyVal}/{BuyRatio} sellS/V/r={SellSat}/{SellVal}/{SellRatio} palette={Palette} scale={Scale:F2} reason={Reason} — submission tab will be flagged for manual pick",
+                        buySatLog, buyValLog, buyRatioLog,
+                        sellSatLog, sellValLog, sellRatioLog,
+                        tabDiagnostic.Palette, scaleFactor, tabDiagnostic.UnknownReason ?? "(none)");
                 }
                 else
                 {
                     _logger.LogInformation(
-                        "Active-tab detection: {Tab} — buySat={BuySat} sellSat={SellSat} palette={Palette} scale={Scale:F2}",
-                        detectedActiveTab, buySatLog, sellSatLog, tabDiagnostic.Palette, scaleFactor);
+                        "Active-tab detection: {Tab} — buyS/V/r={BuySat}/{BuyVal}/{BuyRatio} sellS/V/r={SellSat}/{SellVal}/{SellRatio} palette={Palette} scale={Scale:F2}",
+                        detectedActiveTab,
+                        buySatLog, buyValLog, buyRatioLog,
+                        sellSatLog, sellValLog, sellRatioLog,
+                        tabDiagnostic.Palette, scaleFactor);
                 }
             }
         }
@@ -195,9 +209,25 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
         submission.SourceImageHeight = src.Height;
 
         // Override the parser's text-only tab guess (which, by design, can
-        // never reliably distinguish active from inactive labels) with the
-        // colour-based decision when we have one. Only trust a confident
-        // result; otherwise leave the parser's fallback in place.
+        // never reliably distinguish active from inactive labels — it sees
+        // BOTH "Buy" and "Local Market Value" in the OCR text and has no
+        // way to know which one is highlighted) with the colour-based
+        // decision.
+        //
+        // POLICY when the colour detector itself is inconclusive
+        // (`detectedActiveTab == Unknown`): we DELIBERATELY override the
+        // parser's silent "Buy" default with `Unknown` here. The parser's
+        // text-based heuristic returns `Buy` whenever it sees both labels
+        // and falls through, so leaving the field alone means the
+        // submission ships with `Tab = Buy` regardless of what's actually
+        // active — which on a SELL-tab capture turns into a wrong-tab
+        // submission UEX will either reject (price/quantity mismatch) or,
+        // worse, accept and pollute the live market data with prices
+        // attributed to the wrong direction. Surfacing `Unknown` instead
+        // forces the editor to highlight the tab cell as a required
+        // manual pick before the user can hit Send. Calibrated against
+        // 2026-05-07 Pyro Endgame logs where two SELL captures slipped
+        // through as "Buy" at S/V gaps below the decision margins.
         if (detectedActiveTab is TerminalTab.Buy or TerminalTab.Sell)
         {
             submission.Tab = detectedActiveTab;
@@ -206,6 +236,17 @@ public sealed class PaddleOcrPipeline : IOcrPipeline, IDisposable
                 || f == "tab_unknown");
             submission.NeedsReview.Add(
                 $"tab_detected_{detectedActiveTab.ToString().ToLowerInvariant()}");
+        }
+        else
+        {
+            submission.Tab = TerminalTab.Unknown;
+            submission.NeedsReview.RemoveAll(f =>
+                f.StartsWith("tab_assumed_", StringComparison.Ordinal)
+                || f.StartsWith("tab_detected_", StringComparison.Ordinal));
+            if (!submission.NeedsReview.Contains("tab_unknown"))
+            {
+                submission.NeedsReview.Add("tab_unknown");
+            }
         }
 
         if (preferredTerminalMatch is not null

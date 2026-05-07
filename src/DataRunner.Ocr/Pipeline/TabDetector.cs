@@ -76,9 +76,28 @@ public static class TabDetector
     private const double MinActiveSaturation = 25.0;
 
     /// <summary>HSV-V threshold (0..255) above which a pixel is treated
-    /// as "text-bright". Below this is dark glow / panel background that
-    /// would dilute the saturation average if included.</summary>
+    /// as "text-bright" for the SATURATION-axis mean. Below this is dark
+    /// glow / panel background that would dilute the saturation average
+    /// if included. Calibrated so Stanton greyish inactive labels (V≈
+    /// 180-220) and saturated active labels (V≈180-230) both register,
+    /// while the dark panel chrome (V&lt;50) is excluded.</summary>
     private const int BrightnessFloor = 100;
+
+    /// <summary>HSV-V threshold (0..255) used SPECIFICALLY for the
+    /// VALUE-axis mean. Tighter than <see cref="BrightnessFloor"/> on
+    /// purpose: on Pyro red-themed terminals BOTH tabs (active and
+    /// inactive) sit on a saturated red BACKGROUND fill, with the
+    /// active fill at V≈130-180 and the inactive at V≈80-110. The
+    /// looser <see cref="BrightnessFloor"/> would leak the active
+    /// background into the V mean and pull it close to the inactive
+    /// label's glyph-only V (~150), collapsing the V gap from ≈40 to
+    /// ≈2 — exactly what the 2026-05-07 Pyro Endgame logs show
+    /// (buyV=151.5 vs sellV=149.2 on a SELL-active capture). 150
+    /// keeps the bright glyph cores of BOTH tabs (active glyphs ≈
+    /// 200, inactive glyphs ≈ 150-170) while excluding the panel-
+    /// chrome and inactive-background contributions. Stanton is
+    /// unaffected because the S-axis decides first there.</summary>
+    private const int VAxisBrightnessFloor = 150;
 
     /// <summary>Vertical padding (in original-image px) added above and
     /// below the OCR bounding box when sampling colours. Captures the
@@ -86,15 +105,74 @@ public static class TabDetector
     /// which is often the cleanest source of saturated pixels.</summary>
     private const int VerticalPadding = 4;
 
-    /// <summary>Minimum HSV-V (brightness, 0..255) gap between the two
-    /// labels before we commit to a result on the VALUE axis. Pyro
-    /// stations render BOTH tabs in the same red hue (saturation
-    /// indistinguishable, ~252 on both labels) but the active tab is
-    /// noticeably BRIGHTER than the inactive one. Calibrated from the
-    /// 2026-05-07 Pyro Endgame logs where the V gap stays around
-    /// 30..60 units; 20 is the floor that admits the dimmer Pyro
-    /// captures while staying comfortably above pixel noise.</summary>
-    private const double ValueDecisionMargin = 20.0;
+    /// <summary>Horizontal padding (in original-image px) added on
+    /// either side of the OCR bounding box when sampling colours.
+    /// Critical for the dim INACTIVE tab on Pyro red-themed terminals:
+    /// PaddleOCR returns a very tight bounding box around the dim "BUY"
+    /// glyphs (~6-8 px wide on the upscaled mat) which collapses to
+    /// 3-4 px after dividing by scaleFactor, falling under the
+    /// <see cref="MinRoiPixels"/> floor and triggering
+    /// <c>roi-too-small</c>. Reduced from 8 to 4 on 2026-05-07 (after
+    /// the +8 setting was shown to dilute the V-axis mean by including
+    /// too much tab-background area on Pyro): 4 still pads the
+    /// degenerate 3-4 px BUY ROI up to 11-12 px (well above the
+    /// <see cref="MinRoiPixels"/> floor) without bleeding far into the
+    /// surrounding tab fill. The <see cref="VAxisBrightnessFloor"/>
+    /// glyph-core mask is the second-line defence against any residual
+    /// background contamination.</summary>
+    private const int HorizontalPadding = 4;
+
+    /// <summary>Minimum width/height (in original-image px) the sampled
+    /// ROI must reach before <see cref="MeasureLabel"/> commits to a
+    /// reading. Below this floor the bright-pixel count is too small
+    /// to produce a stable HSV mean. Lowered from 4 to 2 because the
+    /// new <see cref="HorizontalPadding"/> guarantees ≥ 16 px wide ROI
+    /// even on degenerate OCR boxes — keeping a floor at all is just a
+    /// last-resort guard against pathological mat slicing.</summary>
+    private const int MinRoiPixels = 2;
+
+    /// <summary>Minimum HSV-V (brightness, 0..255) gap on the value axis
+    /// for NON-RED palettes (Stanton teal, Crusader amber, etc.) — kept
+    /// strict because on those palettes the S-axis decides first with a
+    /// huge margin, and a V-axis fallback only fires on degenerate
+    /// captures where any small V difference is more likely noise than
+    /// signal. Stanton glyphs (white/grey vs. teal/amber) all sit at
+    /// V≈200, so the genuine V gap is usually below 5 — we'd rather
+    /// return Unknown than commit to a coin-flip.</summary>
+    private const double ValueDecisionMarginGeneric = 20.0;
+
+    /// <summary>Minimum bright-pixel-RATIO gap between the two labels
+    /// before we commit to a Pyro red-palette decision. Pyro renders
+    /// the active tab as a SOLID FILLED rectangle of the theme accent
+    /// (orange/red, V≈150-180) with DARKER text inside (V≈140-160),
+    /// while the inactive tab is just dim text on the dark panel
+    /// chrome. As a result mean-V over the OCR bbox is unreliable —
+    /// active text is darker than inactive text in absolute V terms,
+    /// so the V-mean ordering can flip the wrong way on SELL-active
+    /// captures (observed on 2026-05-07 Pyro Endgame: buyV=171 (dim
+    /// inactive text) vs sellV=161 (bright bg + dark active text),
+    /// classifier picked Buy when SELL was active).
+    ///
+    /// The ratio of pixels above <see cref="BrightnessFloor"/> over
+    /// total ROI area is a more discriminating signal: the active tab
+    /// fills most of the bbox with above-floor pixels (bright bg +
+    /// most of the text), while the inactive tab only has the text
+    /// glyph cores above the floor. Real captures land around
+    /// activeRatio≈0.7..0.9 vs inactiveRatio≈0.2..0.4, a wide gap
+    /// that 0.15 captures while staying above pixel-noise on
+    /// Stanton-on-Red-misclassification scenarios. Combined with the
+    /// <see cref="MinActiveBrightRatio"/> floor (one of the labels
+    /// MUST be ≥ 0.35 — i.e. clearly filled) this rejects tab-bar
+    /// captures where neither side is highlighted (corrupt screenshot
+    /// or game state).</summary>
+    private const double BrightRatioDecisionMarginPyro = 0.15;
+
+    /// <summary>The more-filled of the two labels must reach at least
+    /// this bright-pixel ratio for the Pyro V-axis fallback to fire.
+    /// Stops the detector from committing to a decision when both
+    /// labels are dim (eg. tab bar partially off-screen, transition
+    /// frame, corrupted capture).</summary>
+    private const double MinActiveBrightRatio = 0.35;
 
     /// <summary>The brighter label's mean V must reach at least this
     /// before the V-axis fallback fires. Stops the fallback from
@@ -193,6 +271,23 @@ public static class TabDetector
         var buy = MeasureLabel(originalImage, buyRegion.Value, rightPanelStartX, scaleFactor);
         var sell = MeasureLabel(originalImage, sellRegion.Value, rightPanelStartX, scaleFactor);
 
+        // Geometric fallback for the BUY label: when MeasureLabel could
+        // not produce a usable sample from the OCR-reported bbox (typical
+        // on Pyro SELL-tab captures where the dim BUY glyphs make the
+        // detection box collapse to a few px) but the SELL label landed
+        // a clean reading, we know exactly where BUY lives in original-
+        // image coordinates: same Y band as SELL, somewhere between the
+        // right panel's left edge and SELL's left edge. Sampling that
+        // band directly works because the brightness mask in
+        // MeasureRectInOriginal filters out panel chrome and only the
+        // BUY glyph pixels survive into the HSV averages. This keeps the
+        // detector functional for the common Pyro pattern instead of
+        // surfacing roi-too-small.
+        if (buy is null && sell is not null)
+        {
+            buy = GeometricBuyFallback(originalImage, sellRegion.Value, rightPanelStartX, scaleFactor);
+        }
+
         if (buy is null || sell is null)
             return new TabDetectionResult(TerminalTab.Unknown,
                 buy?.Saturation, sell?.Saturation, "roi-too-small", DetectedPalette.Unknown);
@@ -217,45 +312,101 @@ public static class TabDetector
                 buy.Value.Saturation,
                 sell.Value.Saturation,
                 UnknownReason: null,
-                palette);
+                palette,
+                buy.Value.Value,
+                sell.Value.Value,
+                buy.Value.BrightRatio,
+                sell.Value.BrightRatio);
         }
 
-        // ---- AXIS 2: VALUE (Pyro red theme, where saturation is identical) ------
-        // Pyro renders BOTH tabs in the same saturated red — only the
-        // brightness (HSV-V) differs between active (bright) and inactive
-        // (dim). Trigger this fallback ONLY when saturation was
-        // inconclusive; never overrides a confident saturation decision,
-        // so Stanton captures behave exactly as before.
+        // ---- AXIS 2: PALETTE-SPECIFIC FALLBACK ----------------------------------
+        // S-axis was inconclusive. Pick a secondary discriminator
+        // appropriate for the detected palette family. Each branch
+        // returns Unknown rather than fall through to the OTHER
+        // branch's metric — the metrics aren't interchangeable and
+        // mixing them would produce silent misclassifications when
+        // both signals point in opposite directions on the same
+        // capture.
         var valDiff = buy.Value.Value - sell.Value.Value;
-        var maxVal = Math.Max(buy.Value.Value, sell.Value.Value);
-        var valConclusive =
-            maxVal >= MinActiveValue
-            && Math.Abs(valDiff) >= ValueDecisionMargin;
+        var ratioDiff = buy.Value.BrightRatio - sell.Value.BrightRatio;
 
-        if (valConclusive)
+        if (palette == DetectedPalette.Red)
         {
-            return new TabDetectionResult(
-                valDiff > 0 ? TerminalTab.Buy : TerminalTab.Sell,
-                buy.Value.Saturation,
-                sell.Value.Saturation,
-                UnknownReason: null,
-                palette);
+            // PYRO RED: BOTH tabs are saturated red, V-mean is
+            // unreliable (active tab has bright bg with DARKER text
+            // than the inactive tab's text — V-mean ordering can flip
+            // wrong on SELL-active captures). The discriminator is
+            // BRIGHT-PIXEL RATIO: active tab has a solid filled
+            // rectangle covering most of the bbox (high ratio),
+            // inactive tab is just text glyphs on dark chrome (low
+            // ratio). 2026-05-07 calibration: active≈0.7-0.9,
+            // inactive≈0.2-0.4, so a 0.15 margin captures the signal
+            // robustly.
+            var maxRatio = Math.Max(buy.Value.BrightRatio, sell.Value.BrightRatio);
+            var ratioConclusive =
+                maxRatio >= MinActiveBrightRatio
+                && Math.Abs(ratioDiff) >= BrightRatioDecisionMarginPyro;
+
+            if (ratioConclusive)
+            {
+                return new TabDetectionResult(
+                    ratioDiff > 0 ? TerminalTab.Buy : TerminalTab.Sell,
+                    buy.Value.Saturation,
+                    sell.Value.Saturation,
+                    UnknownReason: null,
+                    palette,
+                    buy.Value.Value,
+                    sell.Value.Value,
+                    buy.Value.BrightRatio,
+                    sell.Value.BrightRatio);
+            }
+        }
+        else
+        {
+            // STANTON/TEAL/AMBER/OTHER: text glyphs on dark chrome on
+            // BOTH tabs (no filled bg), so the bright-ratio signal is
+            // weak (both labels ≈ 0.2-0.3). Use V-mean instead — works
+            // reliably on these themes when the S-axis happened to
+            // miss (eg. amber stations where the dim active label
+            // produces a tighter S gap).
+            var maxVal = Math.Max(buy.Value.Value, sell.Value.Value);
+            var valConclusive =
+                maxVal >= MinActiveValue
+                && Math.Abs(valDiff) >= ValueDecisionMarginGeneric;
+
+            if (valConclusive)
+            {
+                return new TabDetectionResult(
+                    valDiff > 0 ? TerminalTab.Buy : TerminalTab.Sell,
+                    buy.Value.Saturation,
+                    sell.Value.Saturation,
+                    UnknownReason: null,
+                    palette,
+                    buy.Value.Value,
+                    sell.Value.Value,
+                    buy.Value.BrightRatio,
+                    sell.Value.BrightRatio);
+            }
         }
 
         // ---- BOTH AXES INCONCLUSIVE — give up gracefully ------------------------
         // Surface the most informative reason so the log triage points
-        // at WHY the decision failed (palette + which axis had the
-        // tighter gap). UI fallback (manual tab pick) takes over.
+        // at WHY the decision failed (palette + measurement values).
+        // UI fallback (manual tab pick) takes over.
         var reason = maxSat < MinActiveSaturation
-            ? $"both-grey-and-similar-V (S {buy.Value.Saturation:F1}/{sell.Value.Saturation:F1}, V {buy.Value.Value:F1}/{sell.Value.Value:F1}, palette={palette})"
-            : $"low-margin-on-both-axes (S {buy.Value.Saturation:F1}/{sell.Value.Saturation:F1} |diff|={Math.Abs(satDiff):F1}, V {buy.Value.Value:F1}/{sell.Value.Value:F1} |diff|={Math.Abs(valDiff):F1}, palette={palette})";
+            ? $"both-grey (S {buy.Value.Saturation:F1}/{sell.Value.Saturation:F1}, V {buy.Value.Value:F1}/{sell.Value.Value:F1}, ratio {buy.Value.BrightRatio:F2}/{sell.Value.BrightRatio:F2}, palette={palette})"
+            : $"low-margin (S {buy.Value.Saturation:F1}/{sell.Value.Saturation:F1} |d|={Math.Abs(satDiff):F1}, V {buy.Value.Value:F1}/{sell.Value.Value:F1} |d|={Math.Abs(valDiff):F1}, ratio {buy.Value.BrightRatio:F2}/{sell.Value.BrightRatio:F2} |d|={Math.Abs(ratioDiff):F2}, palette={palette})";
 
         return new TabDetectionResult(
             TerminalTab.Unknown,
             buy.Value.Saturation,
             sell.Value.Saturation,
             reason,
-            palette);
+            palette,
+            buy.Value.Value,
+            sell.Value.Value,
+            buy.Value.BrightRatio,
+            sell.Value.BrightRatio);
     }
 
     /// <summary>
@@ -287,47 +438,145 @@ public static class TabDetector
         var origW = (int)Math.Ceiling(bounds.Width / scaleFactor);
         var origH = (int)Math.Ceiling(bounds.Height / scaleFactor);
 
+        // Vertical padding: catches the small accent bar SC renders
+        // immediately above/below the active tab text.
         origY = Math.Max(0, origY - VerticalPadding);
         origH = Math.Min(originalImage.Height - origY, origH + 2 * VerticalPadding);
-        origX = Math.Clamp(origX, 0, Math.Max(0, originalImage.Width - 1));
-        origW = Math.Min(originalImage.Width - origX, origW);
 
-        if (origW < 4 || origH < 4) return null;
+        // Horizontal padding: rescues the dim "BUY" label on Pyro
+        // SELL-tab captures (and any other case where the OCR bbox is
+        // too tight to sample). Clamped to [rightPanelStartX,
+        // imageWidth] so we never reach into the LEFT panel content.
+        var paddedX = origX - HorizontalPadding;
+        origX = Math.Clamp(paddedX, rightPanelStartX, Math.Max(rightPanelStartX, originalImage.Width - 1));
+        origW = Math.Min(originalImage.Width - origX, origW + 2 * HorizontalPadding);
+
+        return MeasureRectInOriginal(originalImage, origX, origY, origW, origH);
+    }
+
+    /// <summary>
+    /// Geometric fallback used when <see cref="MeasureLabel"/> could
+    /// not produce a usable sample for the BUY label. SC always renders
+    /// the BUY tab to the LEFT of the LOCAL MARKET VALUE tab on the
+    /// same Y band; given the SELL bounding box we therefore know the
+    /// BUY label is somewhere inside <c>[rightPanelStartX..sellX]</c>
+    /// at the same vertical position. We sample that whole strip and
+    /// rely on <see cref="MeasureRectInOriginal"/>'s brightness mask
+    /// to filter out the dark panel chrome — only the BUY glyphs
+    /// (which are the only bright pixels in that strip on a
+    /// commodity-terminal screenshot) contribute to the HSV averages.
+    /// </summary>
+    private static LabelSamples? GeometricBuyFallback(
+        Mat originalImage,
+        PaddleOcrResultRegion sellRegion,
+        int rightPanelStartX,
+        double scaleFactor)
+    {
+        var sellBounds = sellRegion.Rect.BoundingRect();
+        var sellOrigX = (int)(sellBounds.X / scaleFactor) + rightPanelStartX;
+        var sellOrigY = (int)(sellBounds.Y / scaleFactor);
+        var sellOrigH = (int)Math.Ceiling(sellBounds.Height / scaleFactor);
+
+        // Y band: same as SELL plus a small padding on each side.
+        var origY = Math.Max(0, sellOrigY - VerticalPadding);
+        var origH = Math.Min(originalImage.Height - origY, sellOrigH + 2 * VerticalPadding);
+
+        // X band: from right panel's left edge up to SELL. We trim a
+        // few pixels off the right edge so the SELL glyphs themselves
+        // are not included in the BUY sample.
+        var origX = rightPanelStartX;
+        var origW = sellOrigX - rightPanelStartX - 2;
+
+        // Sanity: the strip must be at least 16 px wide to contain a
+        // 3-letter label. A narrower strip means the SELL bbox started
+        // unusually close to the panel edge — bail out rather than
+        // sample chrome.
+        if (origW < 16 || origH < 8) return null;
+
+        return MeasureRectInOriginal(originalImage, origX, origY, origW, origH);
+    }
+
+    /// <summary>
+    /// Shared HSV-sampling primitive used by both <see cref="MeasureLabel"/>
+    /// (OCR-driven) and <see cref="GeometricBuyFallback"/> (geometry-driven).
+    /// Builds a brightness mask, then averages H/S/V over the bright pixels.
+    /// </summary>
+    private static LabelSamples? MeasureRectInOriginal(
+        Mat originalImage,
+        int origX,
+        int origY,
+        int origW,
+        int origH)
+    {
+        if (origW < MinRoiPixels || origH < MinRoiPixels) return null;
+        if (origX < 0 || origY < 0
+            || origX + origW > originalImage.Width
+            || origY + origH > originalImage.Height) return null;
 
         using var roi = new Mat(originalImage, new Rect(origX, origY, origW, origH));
         using var hsv = new Mat();
         Cv2.CvtColor(roi, hsv, ColorConversionCodes.BGR2HSV);
 
         var hsvChannels = Cv2.Split(hsv);
+        Mat? glyphCoreMask = null;
         try
         {
-            // Mask of "text-bright" pixels — only the rendered glyphs and
-            // their close glow. Excludes panel background which would
-            // pull the means down regardless of tab state.
+            // PRIMARY MASK: "text-bright" pixels — glyphs and their
+            // close glow, panel chrome below V=100 excluded. Used for
+            // S-axis and Hue means. Stanton's grey-vs-coloured
+            // discrimination has always worked at this floor.
             using var brightMask = new Mat();
             Cv2.Threshold(hsvChannels[2], brightMask, BrightnessFloor, 255, ThresholdTypes.Binary);
 
             var brightCount = Cv2.CountNonZero(brightMask);
             if (brightCount < 8) return null;
 
-            // S-axis mean: discriminates grey vs colored (Stanton/teal).
+            // S-axis mean: discriminates grey vs coloured (Stanton/teal).
             // Active label (any saturated colour): typically 130..220.
             // Inactive label (grey/white)        : typically  10.. 50.
             var meanS = Cv2.Mean(hsvChannels[1], brightMask).Val0;
 
+            // SECONDARY MASK for V-axis: tighter floor isolates GLYPH
+            // CORES from the saturated tab-fill background that Pyro
+            // renders behind both labels. Without this the V means
+            // collapse to ≈150 on both labels (background-dominated)
+            // and the V-axis decision can't tell active from inactive.
+            // Stanton is unaffected because both glyph types easily
+            // exceed V=150 and the S-axis decides first anyway.
+            glyphCoreMask = new Mat();
+            Cv2.Threshold(hsvChannels[2], glyphCoreMask, VAxisBrightnessFloor, 255, ThresholdTypes.Binary);
+            var glyphCoreCount = Cv2.CountNonZero(glyphCoreMask);
+
             // V-axis mean: discriminates dim vs bright at the same hue
-            // (Pyro/red). Active label sits ~210, inactive ~170.
-            var meanV = Cv2.Mean(hsvChannels[2], brightMask).Val0;
+            // (Pyro red). Active label sits ~200 in glyph cores,
+            // inactive ~150. Falls back to the looser brightMask V mean
+            // when the tighter mask is too sparse to give a stable
+            // average — protects degenerate captures from a synthetic
+            // V≈0 reading.
+            var meanV = glyphCoreCount >= 4
+                ? Cv2.Mean(hsvChannels[2], glyphCoreMask).Val0
+                : Cv2.Mean(hsvChannels[2], brightMask).Val0;
 
             // Hue mean: only useful for palette classification (red
             // wraps around 0 and 180 in OpenCV's 0..179 H-channel — we
             // handle the wrap inside ClassifyPalette).
             var meanH = Cv2.Mean(hsvChannels[0], brightMask).Val0;
 
-            return new LabelSamples(meanH, meanS, meanV);
+            // Bright ratio: proportion of ROI pixels above the loose
+            // BrightnessFloor. PRIMARY discriminator for Pyro red,
+            // where the active tab is a solid filled rectangle (most
+            // of the bbox above the floor) and the inactive is just
+            // text glyphs on dark chrome (small fraction above).
+            var totalPixels = origW * origH;
+            var brightRatio = totalPixels > 0
+                ? (double)brightCount / totalPixels
+                : 0.0;
+
+            return new LabelSamples(meanH, meanS, meanV, brightRatio);
         }
         finally
         {
+            glyphCoreMask?.Dispose();
             foreach (var c in hsvChannels) c.Dispose();
         }
     }
@@ -363,11 +612,20 @@ public static class TabDetector
         return DetectedPalette.Unknown;
     }
 
-    /// <summary>Holder for the three HSV channel means measured over a
-    /// label's bright pixels. Used to drive both the saturation-axis
-    /// (Stanton) and value-axis (Pyro) discrimination paths in
-    /// <see cref="Diagnose"/>.</summary>
-    private readonly record struct LabelSamples(double Hue, double Saturation, double Value);
+    /// <summary>Holder for the per-label measurements:
+    /// <list type="bullet">
+    /// <item><c>Hue</c>/<c>Saturation</c>/<c>Value</c> — HSV channel
+    /// means over the bright-pixel mask (Stanton/Pyro generic
+    /// discrimination paths).</item>
+    /// <item><c>BrightRatio</c> — fraction of the ROI (0..1) whose V
+    /// channel is above <see cref="BrightnessFloor"/>. Used as the
+    /// PRIMARY discriminator on Pyro red-themed terminals where the
+    /// active tab has a solid filled background that takes most of
+    /// the bbox, while the inactive tab only renders text on dark
+    /// chrome.</item>
+    /// </list>
+    /// </summary>
+    private readonly record struct LabelSamples(double Hue, double Saturation, double Value, double BrightRatio);
 }
 
 /// <summary>
@@ -393,9 +651,10 @@ public enum DetectedPalette
 
 /// <summary>
 /// Result of <see cref="TabDetector.Diagnose"/>. Carries the decision
-/// plus the raw saturation samples and the detected theme palette so
-/// callers can log or display the numbers when the detector returned
-/// <see cref="TerminalTab.Unknown"/>.
+/// plus the raw measurement samples and the detected theme palette so
+/// callers can log or display the numbers — useful both for triage
+/// when the detector returned <see cref="TerminalTab.Unknown"/> AND for
+/// calibration of palette-specific thresholds against fresh captures.
 /// </summary>
 /// <param name="Tab">Active tab decision (Buy / Sell / Unknown).</param>
 /// <param name="BuySaturation">Mean HSV-S of the BUY label, or
@@ -409,9 +668,25 @@ public enum DetectedPalette
 /// colour (Pyro red, Stanton teal, Crusader amber, …). Always
 /// populated even on success — useful to spot palette-related
 /// regressions in batch log analysis.</param>
+/// <param name="BuyValue">Mean HSV-V of the BUY label over the
+/// glyph-core mask. Diagnostic-only on success; one of the inputs
+/// to the V-axis decision on non-Red palettes.</param>
+/// <param name="SellValue">Mean HSV-V of the LOCAL MARKET VALUE
+/// label. Diagnostic-only on success; one of the inputs to the
+/// V-axis decision on non-Red palettes.</param>
+/// <param name="BuyBrightRatio">Fraction of BUY ROI pixels above
+/// the bright-pixel floor. Primary discriminator on Pyro Red
+/// (active tab has filled bg ≈ 0.7-0.9 vs inactive text-only ≈
+/// 0.2-0.4). Diagnostic-only on non-Red palettes.</param>
+/// <param name="SellBrightRatio">Fraction of LMV ROI pixels above
+/// the bright-pixel floor. See <see cref="BuyBrightRatio"/>.</param>
 public readonly record struct TabDetectionResult(
     TerminalTab Tab,
     double? BuySaturation,
     double? SellSaturation,
     string? UnknownReason,
-    DetectedPalette Palette = DetectedPalette.Unknown);
+    DetectedPalette Palette = DetectedPalette.Unknown,
+    double? BuyValue = null,
+    double? SellValue = null,
+    double? BuyBrightRatio = null,
+    double? SellBrightRatio = null);
