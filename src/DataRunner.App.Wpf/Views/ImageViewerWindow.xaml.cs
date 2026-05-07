@@ -7,7 +7,7 @@ namespace DataRunner.App.Views;
 /// <summary>
 /// Full-screen modal screenshot viewer. Most of the zoom/pan logic lives in the
 /// reusable <see cref="ScreenshotPanel"/> control; this Window only adds the
-/// dialog chrome (Esc to close, top-right Close button, bottom hint).
+/// dialog chrome (Esc to close, close in the viewer toolbar, bottom hint).
 /// </summary>
 public partial class ImageViewerWindow : Window
 {
@@ -27,5 +27,5 @@ public partial class ImageViewerWindow : Window
         base.OnPreviewKeyDown(e);
     }
 
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
+    private void Viewer_CloseRequested(object sender, RoutedEventArgs e) => Close();
 }

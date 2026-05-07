@@ -7,6 +7,10 @@
              mc:Ignorable="d"
              d:DesignHeight="500" d:DesignWidth="400">
 
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </UserControl.Resources>
+
     <!-- Reusable screenshot viewer with zoom + pan, used in two places:
            1. ImageViewerWindow (full-screen modal, owned by main window)
            2. ScreenshotEditView (docked side-by-side panel, opt-in toggle)
@@ -38,45 +42,61 @@
              decides how to close: window in modal mode, toggle in side-by-side). -->
         <Border VerticalAlignment="Top" HorizontalAlignment="Stretch"
                 Background="#88000000" Padding="8,6">
-            <DockPanel>
-                <TextBlock DockPanel.Dock="Left"
+            <!-- Grid: title (* ) + toolbar (Auto) so buttons always reserve full width.
+                 DockPanel + last-child fill squeezed the tool strip and made the
+                 right-hand action buttons overlap when the panel was narrow. -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0"
                            Text="{Binding HeaderLabel, RelativeSource={RelativeSource AncestorType=UserControl}}"
                            Foreground="White" FontSize="11" Opacity="0.7"
-                           VerticalAlignment="Center" />
-                <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           Margin="0,0,8,0" />
+                <StackPanel Grid.Column="1"
                             Orientation="Horizontal">
                     <ui:Button Appearance="Transparent"
-                               Padding="6,3" Margin="0,0,2,0"
+                               Padding="6,3" Margin="0,0,4,0"
                                Click="ZoomOut_Click"
                                ToolTip="Zoom out (or scroll wheel)">
                         <ui:SymbolIcon Symbol="ZoomOut24" Foreground="White" FontSize="14" />
                     </ui:Button>
                     <ui:Button Appearance="Transparent"
-                               Padding="6,3" Margin="0,0,2,0"
+                               Padding="6,3" Margin="0,0,4,0"
                                Click="ZoomReset_Click"
                                ToolTip="Reset zoom to 100%">
                         <TextBlock Text="100%" Foreground="White" FontSize="11" />
                     </ui:Button>
                     <ui:Button Appearance="Transparent"
-                               Padding="6,3"
+                               Padding="6,3" Margin="0,0,4,0"
                                Click="ZoomIn_Click"
                                ToolTip="Zoom in (or scroll wheel)">
                         <ui:SymbolIcon Symbol="ZoomIn24" Foreground="White" FontSize="14" />
                     </ui:Button>
                     <ui:Button Appearance="Transparent"
-                               Padding="6,3" Margin="8,0,0,0"
+                               Padding="6,3" Margin="0,0,4,0"
                                Click="FitRightPanel_Click"
                                ToolTip="Zoom to the commodity panel (right side)">
                         <ui:SymbolIcon Symbol="CropInterim24" Foreground="White" FontSize="14" />
                     </ui:Button>
                     <ui:Button Appearance="Transparent"
-                               Padding="6,3" Margin="2,0,0,0"
+                               Padding="6,3" Margin="0,0,4,0"
                                Click="FitToWindow_Click"
                                ToolTip="Fit entire screenshot">
                         <ui:SymbolIcon Symbol="ArrowMaximize24" Foreground="White" FontSize="14" />
                     </ui:Button>
+                    <ui:Button Appearance="Transparent"
+                               Padding="6,3" Margin="12,0,0,0"
+                               Click="CloseToolbar_Click"
+                               ToolTip="Close (Esc)"
+                               Visibility="{Binding ShowCloseButton, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVisibility}}">
+                        <ui:SymbolIcon Symbol="Dismiss24" Foreground="White" FontSize="14" />
+                    </ui:Button>
                 </StackPanel>
-            </DockPanel>
+            </Grid>
         </Border>
     </Grid>
 </UserControl>

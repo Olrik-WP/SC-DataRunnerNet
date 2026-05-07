@@ -49,6 +49,31 @@ public partial class ScreenshotPanel : UserControl
         set => SetValue(HeaderLabelProperty, value);
     }
 
+    public static readonly DependencyProperty ShowCloseButtonProperty = DependencyProperty.Register(
+        nameof(ShowCloseButton),
+        typeof(bool),
+        typeof(ScreenshotPanel),
+        new PropertyMetadata(false));
+
+    /// <summary>When true, shows a close control in the top toolbar (full-screen window only).</summary>
+    public bool ShowCloseButton
+    {
+        get => (bool)GetValue(ShowCloseButtonProperty);
+        set => SetValue(ShowCloseButtonProperty, value);
+    }
+
+    public static readonly RoutedEvent CloseRequestedEvent = EventManager.RegisterRoutedEvent(
+        nameof(CloseRequested),
+        RoutingStrategy.Bubble,
+        typeof(RoutedEventHandler),
+        typeof(ScreenshotPanel));
+
+    public event RoutedEventHandler CloseRequested
+    {
+        add => AddHandler(CloseRequestedEvent, value);
+        remove => RemoveHandler(CloseRequestedEvent, value);
+    }
+
     public ScreenshotPanel()
     {
         InitializeComponent();
@@ -220,4 +245,7 @@ public partial class ScreenshotPanel : UserControl
 
     private void FitRightPanel_Click(object sender, RoutedEventArgs e) => FitRightPanel();
     private void FitToWindow_Click(object sender, RoutedEventArgs e) => FitToWindow();
+
+    private void CloseToolbar_Click(object sender, RoutedEventArgs e) =>
+        RaiseEvent(new RoutedEventArgs(CloseRequestedEvent, this));
 }
